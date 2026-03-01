@@ -25,7 +25,7 @@ import time
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fetchers import okx, bitfinex, binance, mexc
+from fetchers import okx, bitfinex, binance, mexc, polymarket
 import html_builder
 
 
@@ -50,8 +50,8 @@ def parse_args():
 
     p.add_argument('--auto', action='store_true',
                    help='Auto mode: fetch all granularities with default periods')
-    p.add_argument('--assets', default='xaut,btc,spyx',
-                   help='Comma-separated assets: xaut,btc,spyx (default: xaut,btc,spyx)')
+    p.add_argument('--assets', default='xaut,btc,spyx,iran',
+                   help='Comma-separated assets: xaut,btc,spyx,iran (default: xaut,btc,spyx,iran)')
     p.add_argument('--xaut-sources', default='okx,bitfinex',
                    help='Comma-separated XAUt sources: okx,bitfinex (default: both)')
     p.add_argument('--days', type=int, default=None,
@@ -163,6 +163,18 @@ def main():
             except Exception as e:
                 print(f'  [ERROR] MEXC SPYx fetch failed: {e}')
                 all_data[f'spyx_mexc_{gran}'] = []
+
+        # Iran Strike Probability (Polymarket)
+        if 'iran' in assets:
+            print(f'  Fetching Iran strike prob from Polymarket...')
+            try:
+                data = polymarket.fetch(start_ts, end_ts, gran,
+                                        verbose=args.verbose)
+                all_data[f'iran_polymarket_{gran}'] = data
+                total_candles += len(data)
+            except Exception as e:
+                print(f'  [ERROR] Polymarket Iran fetch failed: {e}')
+                all_data[f'iran_polymarket_{gran}'] = []
 
     print(f'\n=== Total: {total_candles} candles across {len(all_data)} series ===')
 

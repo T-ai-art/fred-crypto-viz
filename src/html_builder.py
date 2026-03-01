@@ -189,6 +189,7 @@ document.addEventListener('DOMContentLoaded', function() { initApp(); });
   --gold: #f0b90b; --gold-dim: #f0b90b80; --btc: #f7931a; --btc-dim: #f7931a80;
   --bitfinex: #16b979; --bitfinex-dim: #16b97980;
   --spyx: #a855f7; --spyx-dim: #a855f780;
+  --iran: #ef4444; --iran-dim: #ef444480;
   --green: #3fb950; --red: #f85149;
 }}
 * {{ margin:0; padding:0; box-sizing:border-box; }}
@@ -258,6 +259,7 @@ footer a {{ color:var(--accent); text-decoration:none; }}
       <label>Right Axis:</label>
       <input type="radio" name="right-axis" id="rb-btc" value="btc" checked onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-btc').click()"> BTC</span>
       <input type="radio" name="right-axis" id="rb-spyx" value="spyx" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-spyx').click()"> SPYx</span>
+      <input type="radio" name="right-axis" id="rb-iran" value="iran" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-iran').click()"> Iran %</span>
       <input type="radio" name="right-axis" id="rb-none" value="none" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-none').click()"> None</span>
     </div>
     <div class="sep"></div>
@@ -300,7 +302,7 @@ footer a {{ color:var(--accent); text-decoration:none; }}
   <div class="data-info" id="data-info"></div>
 
   <footer>
-    <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a> | <a href="https://www.mexc.com" target="_blank">MEXC</a></div>
+    <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a> | <a href="https://www.mexc.com" target="_blank">MEXC</a> | <a href="https://polymarket.com/event/us-strikes-iran-by" target="_blank">Polymarket</a></div>
     <div>Last updated: {generated_at}</div>
   </footer>
   </div>
@@ -336,13 +338,16 @@ var COLORS = {{
   xaut_bitfinex: {{line:'#16b979',fill:'rgba(22,185,121,0.08)',label:'XAUt (Bitfinex)'}},
   btc_binance:   {{line:'#f7931a',fill:'rgba(247,147,26,0.08)',label:'BTC (Binance)'}},
   spyx_mexc:     {{line:'#a855f7',fill:'rgba(168,85,247,0.08)',label:'SPYx (MEXC)'}},
+  iran_polymarket:{{line:'#ef4444',fill:'rgba(239,68,68,0.12)',label:'Iran Strike % (Polymarket)'}},
 }};
 
 // Right-axis asset labels for Y-axis title
 var RIGHT_AXIS_LABELS = {{
   btc: 'BTC (USD)',
   spyx: 'SPYx (USD)',
+  iran: 'Strike Probability (%)',
 }};
+var PERCENT_ASSETS = ['iran'];
 
 {decrypt_js}
 
@@ -400,6 +405,17 @@ function initApp() {{
     document.getElementById('rb-spyx').disabled = true;
     var lbl = document.getElementById('rb-spyx').nextElementSibling;
     if (lbl) lbl.className = 'cb-label disabled';
+  }}
+
+  // Check if Iran data exists for any granularity
+  var hasIran = false;
+  for (var k in DATA) {{
+    if (k.indexOf('iran_') === 0 && DATA[k] && DATA[k].length > 0) {{ hasIran = true; break; }}
+  }}
+  if (!hasIran) {{
+    document.getElementById('rb-iran').disabled = true;
+    var lbl2 = document.getElementById('rb-iran').nextElementSibling;
+    if (lbl2) lbl2.className = 'cb-label disabled';
   }}
 
   render();
@@ -469,6 +485,13 @@ function render() {{
       datasets.push(makeDataset('spyx_mexc', d, axisId, false));
       if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
     }}
+  }} else if (rightAsset === 'iran') {{
+    var d = getFiltered('iran_polymarket_' + gran, startTs, endTs);
+    if (d.length > 0) {{
+      var axisId = hasLeftAxis ? 'y1' : 'y';
+      datasets.push(makeDataset('iran_polymarket', d, axisId, false));
+      if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
+    }}
   }}
 
   if (chart) chart.destroy();
@@ -486,7 +509,13 @@ function render() {{
     scales.y = {{ position:'left', title:{{display:true,text:showXaut ? leftLabel : rightLabel,color:'#8b949e'}}, grid:{{color:'rgba(48,54,61,0.6)'}}, ticks:{{color:'#8b949e',callback:function(v){{return '$'+v.toLocaleString();}}}} }};
   }}
   if (hasRightAxis) {{
-    scales.y1 = {{ position:'right', title:{{display:true,text:rightLabel,color:'#8b949e'}}, grid:{{drawOnChartArea:false}}, ticks:{{color:'#8b949e',callback:function(v){{return '$'+v.toLocaleString();}}}} }};
+    var isPercent = PERCENT_ASSETS.indexOf(rightAsset) >= 0;
+    var rightTickFn = isPercent
+      ? function(v){{return v.toFixed(1)+'%';}}
+      : function(v){{return '$'+v.toLocaleString();}};
+    var rightAxisOpts = {{ position:'right', title:{{display:true,text:rightLabel,color:'#8b949e'}}, grid:{{drawOnChartArea:false}}, ticks:{{color:'#8b949e',callback:rightTickFn}} }};
+    if (isPercent) {{ rightAxisOpts.min = 0; rightAxisOpts.max = 100; }}
+    scales.y1 = rightAxisOpts;
   }}
 
   chart = new Chart(ctx, {{
@@ -495,7 +524,10 @@ function render() {{
       responsive:true, maintainAspectRatio:false,
       interaction:{{mode:'index',intersect:false}},
       plugins: {{
-        tooltip:{{callbacks:{{label:function(ctx){{return ctx.dataset.label+': $'+ctx.parsed.y.toLocaleString(undefined,{{minimumFractionDigits:2,maximumFractionDigits:2}});}}}}}},
+        tooltip:{{callbacks:{{label:function(ctx){{
+          if(ctx.dataset.label&&ctx.dataset.label.indexOf('%')>=0){{return ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+'%';}}
+          return ctx.dataset.label+': $'+ctx.parsed.y.toLocaleString(undefined,{{minimumFractionDigits:2,maximumFractionDigits:2}});
+        }}}}}},
         legend:{{labels:{{color:'#c9d1d9',usePointStyle:true,pointStyle:'line'}}}}
       }},
       scales:scales,
@@ -510,6 +542,7 @@ function render() {{
   if (showXaut) parts.push('XAUt');
   if (rightAsset === 'btc') parts.push('BTC');
   else if (rightAsset === 'spyx') parts.push('SPYx');
+  else if (rightAsset === 'iran') parts.push('Iran Strike %');
   document.getElementById('chart-title').textContent = parts.join(' & ')+' \\u2014 '+gran+' Chart';
 }}
 
@@ -526,15 +559,20 @@ function updateStats(gran, startTs, endTs, showXaut, showOkx, showBfx, rightAsse
   if (showXaut && showBfx) cards.push({{key:'xaut_bitfinex_'+gran,name:'XAUt (Bitfinex)',color:'var(--bitfinex)'}});
   if (rightAsset === 'btc') cards.push({{key:'btc_binance_'+gran,name:'BTC (Binance)',color:'var(--btc)'}});
   if (rightAsset === 'spyx') cards.push({{key:'spyx_mexc_'+gran,name:'SPYx (MEXC)',color:'var(--spyx)'}});
+  if (rightAsset === 'iran') cards.push({{key:'iran_polymarket_'+gran,name:'Iran Strike % (Polymarket)',color:'var(--iran)',isPercent:true}});
   cards.forEach(function(c) {{
     var d = getFiltered(c.key, startTs, endTs);
     if (d.length === 0) return;
     var first=d[0][4],last=d[d.length-1][4];
     var high=Math.max.apply(null,d.map(function(x){{return x[2];}}));
     var low=Math.min.apply(null,d.map(function(x){{return x[3];}}));
-    var chg=((last-first)/first*100);
+    var chg=first!==0?((last-first)/first*100):0;
     var chgClass=chg>=0?'up':'down', chgSign=chg>=0?'+':'';
-    container.innerHTML += '<div class="stat-card" style="border-top:3px solid '+c.color+'"><div class="label">'+c.name+'</div><div class="value">$'+last.toLocaleString(undefined,{{minimumFractionDigits:2,maximumFractionDigits:2}})+'</div><div class="change '+chgClass+'">'+chgSign+chg.toFixed(2)+'% &nbsp; H:$'+high.toLocaleString(undefined,{{maximumFractionDigits:2}})+' L:$'+low.toLocaleString(undefined,{{maximumFractionDigits:2}})+'</div><div class="label" style="margin-top:6px">'+d.length+' candles</div></div>';
+    var isPct = c.isPercent;
+    var valStr = isPct ? last.toFixed(1)+'%' : '$'+last.toLocaleString(undefined,{{minimumFractionDigits:2,maximumFractionDigits:2}});
+    var hiStr = isPct ? high.toFixed(1)+'%' : '$'+high.toLocaleString(undefined,{{maximumFractionDigits:2}});
+    var loStr = isPct ? low.toFixed(1)+'%' : '$'+low.toLocaleString(undefined,{{maximumFractionDigits:2}});
+    container.innerHTML += '<div class="stat-card" style="border-top:3px solid '+c.color+'"><div class="label">'+c.name+'</div><div class="value">'+valStr+'</div><div class="change '+chgClass+'">'+chgSign+chg.toFixed(2)+'% &nbsp; H:'+hiStr+' L:'+loStr+'</div><div class="label" style="margin-top:6px">'+d.length+(isPct?' points':' candles')+'</div></div>';
   }});
 }}
 
@@ -562,7 +600,7 @@ function exportCSV() {{
   var endTs=dateToTs(document.getElementById('date-end').value)+86400;
   // Export ALL series for this granularity, regardless of UI selection
   var series=[];
-  var allKeys=['xaut_okx_'+gran,'xaut_bitfinex_'+gran,'btc_binance_'+gran,'spyx_mexc_'+gran];
+  var allKeys=['xaut_okx_'+gran,'xaut_bitfinex_'+gran,'btc_binance_'+gran,'spyx_mexc_'+gran,'iran_polymarket_'+gran];
   allKeys.forEach(function(key){{ if(DATA[key]&&DATA[key].length>0) series.push(key); }});
   var tsMap={{}};
   series.forEach(function(key){{ var d=getFiltered(key,startTs,endTs); d.forEach(function(row){{ if(!tsMap[row[0]])tsMap[row[0]]={{}}; tsMap[row[0]][key]=row; }}); }});
@@ -587,6 +625,7 @@ function exportXLSX() {{
   if(DATA['xaut_bitfinex_'+gran]&&DATA['xaut_bitfinex_'+gran].length>0) sheetConfigs.push({{key:'xaut_bitfinex_'+gran,name:'XAUt_Bitfinex'}});
   if(DATA['btc_binance_'+gran]&&DATA['btc_binance_'+gran].length>0) sheetConfigs.push({{key:'btc_binance_'+gran,name:'BTC_Binance'}});
   if(DATA['spyx_mexc_'+gran]&&DATA['spyx_mexc_'+gran].length>0) sheetConfigs.push({{key:'spyx_mexc_'+gran,name:'SPYx_MEXC'}});
+  if(DATA['iran_polymarket_'+gran]&&DATA['iran_polymarket_'+gran].length>0) sheetConfigs.push({{key:'iran_polymarket_'+gran,name:'Iran_Polymarket'}});
   sheetConfigs.forEach(function(cfg){{
     var d=getFiltered(cfg.key,startTs,endTs);
     var rows=[['Timestamp','DateTime','Open','High','Low','Close','Volume']];
