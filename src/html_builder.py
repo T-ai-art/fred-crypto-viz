@@ -86,66 +86,63 @@ def build_html(all_data, meta, cdn=True, password=None):
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>'''
 
-    # ===== Encrypt or embed plaintext =====
+    # ===== Data embedding strategy =====
+    # Chart data is always plaintext (viewable by anyone)
+    # Download data is encrypted when password is set
+    data_embed = f'''
+var DATA = {data_json};
+var META = {meta_json};'''
+
     if password:
         encrypted = _encrypt_data(data_json, password)
-        data_embed = f'''
-var ENCRYPTED = {{
+        data_embed += f'''
+var DOWNLOAD_ENCRYPTED = {{
   salt: "{encrypted['salt']}",
   iv: "{encrypted['iv']}",
   ct: "{encrypted['ct']}"
 }};
-var DATA = null;
-var META = {meta_json};'''
+var DOWNLOAD_UNLOCKED = false;'''
     else:
-        data_embed = f'''
-var DATA = {data_json};
-var META = {meta_json};'''
+        data_embed += '''
+var DOWNLOAD_ENCRYPTED = null;
+var DOWNLOAD_UNLOCKED = true;'''
 
-    # ===== Password screen (only if encrypted) =====
-    if password:
-        password_screen = '''
-  <!-- Password Screen -->
-  <div id="lock-screen" style="display:flex;align-items:center;justify-content:center;min-height:80vh;">
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:40px;max-width:400px;width:100%;text-align:center;">
-      <div style="font-size:48px;margin-bottom:16px;">&#128274;</div>
-      <h2 style="color:#f0f6fc;margin-bottom:8px;">Crypto Asset Data Explorer</h2>
-      <p style="color:var(--text-dim);margin-bottom:24px;font-size:14px;">This content is encrypted. Enter the password to access.</p>
-      <input type="password" id="pw-input" placeholder="Password"
-        style="width:100%;padding:10px 14px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:15px;margin-bottom:12px;outline:none;"
-        onkeydown="if(event.key===\'Enter\')decrypt()">
-      <button onclick="decrypt()"
-        style="width:100%;padding:10px;background:var(--accent);color:#0d1117;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;">
-        Unlock</button>
-      <div id="pw-error" style="color:var(--red);font-size:13px;margin-top:12px;display:none;">
-        Incorrect password. Please try again.</div>
-    </div>
-  </div>'''
-        main_display = 'style="display:none;"'
-    else:
-        password_screen = ''
-        main_display = ''
+    # No lock screen needed — chart is always visible
+    password_screen = ''
+    main_display = ''
 
-    # ===== Decryption JS (only if encrypted) =====
+    # ===== Download password modal (only if encrypted) =====
     if password:
         decrypt_js = '''
-// ========== AES-256-GCM DECRYPTION (Web Crypto API) ==========
-async function decrypt() {
-  var pw = document.getElementById("pw-input").value;
+// ========== DOWNLOAD PASSWORD MODAL ==========
+var _pendingExportFn = null;
+
+function showDownloadModal(exportFn) {
+  _pendingExportFn = exportFn;
+  document.getElementById("dl-modal").style.display = "flex";
+  document.getElementById("dl-pw-input").value = "";
+  document.getElementById("dl-pw-error").style.display = "none";
+  document.getElementById("dl-pw-input").focus();
+}
+
+function closeDownloadModal() {
+  document.getElementById("dl-modal").style.display = "none";
+  _pendingExportFn = null;
+}
+
+async function unlockDownload() {
+  var pw = document.getElementById("dl-pw-input").value;
   if (!pw) return;
-  document.getElementById("pw-error").style.display = "none";
+  document.getElementById("dl-pw-error").style.display = "none";
 
   try {
-    var saltBuf = Uint8Array.from(atob(ENCRYPTED.salt), function(c){return c.charCodeAt(0);});
-    var ivBuf   = Uint8Array.from(atob(ENCRYPTED.iv),   function(c){return c.charCodeAt(0);});
-    var ctBuf   = Uint8Array.from(atob(ENCRYPTED.ct),    function(c){return c.charCodeAt(0);});
+    var saltBuf = Uint8Array.from(atob(DOWNLOAD_ENCRYPTED.salt), function(c){return c.charCodeAt(0);});
+    var ivBuf   = Uint8Array.from(atob(DOWNLOAD_ENCRYPTED.iv),   function(c){return c.charCodeAt(0);});
+    var ctBuf   = Uint8Array.from(atob(DOWNLOAD_ENCRYPTED.ct),    function(c){return c.charCodeAt(0);});
 
-    // Import password as key material
     var keyMaterial = await crypto.subtle.importKey(
       "raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]
     );
-
-    // Derive AES-GCM key (must match Python: SHA-256, 100000 iterations, 256-bit)
     var aesKey = await crypto.subtle.deriveKey(
       {name: "PBKDF2", salt: saltBuf, iterations: 100000, hash: "SHA-256"},
       keyMaterial,
@@ -153,42 +150,26 @@ async function decrypt() {
       false,
       ["decrypt"]
     );
-
-    // Decrypt
     var decrypted = await crypto.subtle.decrypt(
-      {name: "AES-GCM", iv: ivBuf},
-      aesKey,
-      ctBuf
+      {name: "AES-GCM", iv: ivBuf}, aesKey, ctBuf
     );
 
-    var jsonStr = new TextDecoder().decode(decrypted);
-    DATA = JSON.parse(jsonStr);
-
-    // Hide lock screen, show main content
-    document.getElementById("lock-screen").style.display = "none";
-    document.getElementById("main-content").style.display = "block";
-    initApp();
+    // Success — password correct, unlock downloads for this session
+    DOWNLOAD_UNLOCKED = true;
+    closeDownloadModal();
+    if (_pendingExportFn) { _pendingExportFn(); _pendingExportFn = null; }
 
   } catch(e) {
-    document.getElementById("pw-error").style.display = "block";
-    document.getElementById("pw-input").value = "";
-    document.getElementById("pw-input").focus();
+    document.getElementById("dl-pw-error").style.display = "block";
+    document.getElementById("dl-pw-input").value = "";
+    document.getElementById("dl-pw-input").focus();
   }
-}
-'''
-        init_call = '''
-// If not encrypted, init immediately
-if (DATA !== null) {
-  document.addEventListener("DOMContentLoaded", function() { initApp(); });
-} else {
-  document.addEventListener("DOMContentLoaded", function() {
-    document.getElementById("pw-input").focus();
-  });
 }
 '''
     else:
         decrypt_js = ''
-        init_call = '''
+
+    init_call = '''
 document.addEventListener('DOMContentLoaded', function() { initApp(); });
 '''
 
@@ -197,6 +178,12 @@ document.addEventListener('DOMContentLoaded', function() { initApp(); });
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CryptoExplorer">
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Crypto Asset Data Explorer | XAUt &amp; BTC</title>
 {chartjs_tag}
 <style>
@@ -294,8 +281,8 @@ footer a {{ color:var(--accent); text-decoration:none; }}
     </div>
     <div class="sep"></div>
     <div class="ctrl-group">
-      <button class="btn btn-export" onclick="exportCSV()">CSV</button>
-      <button class="btn btn-export" onclick="exportXLSX()">Excel</button>
+      <button class="btn btn-export" onclick="guardedExport(exportCSV)">CSV</button>
+      <button class="btn btn-export" onclick="guardedExport(exportXLSX)">Excel</button>
     </div>
   </div>
 
@@ -312,6 +299,25 @@ footer a {{ color:var(--accent); text-decoration:none; }}
     <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a></div>
     <div>Last updated: {generated_at}</div>
   </footer>
+  </div>
+
+  <!-- Download Password Modal -->
+  <div id="dl-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;max-width:380px;width:90%;text-align:center;">
+      <div style="font-size:36px;margin-bottom:12px;">&#128274;</div>
+      <h3 style="color:#f0f6fc;margin-bottom:6px;">Download Protected</h3>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:20px;">Enter the password to download data files.</p>
+      <input type="password" id="dl-pw-input" placeholder="Password"
+        style="width:100%;padding:10px 14px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:15px;margin-bottom:10px;outline:none;"
+        onkeydown="if(event.key==='Enter')unlockDownload()">
+      <div style="display:flex;gap:8px;">
+        <button onclick="closeDownloadModal()"
+          style="flex:1;padding:10px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:14px;cursor:pointer;">Cancel</button>
+        <button onclick="unlockDownload()"
+          style="flex:1;padding:10px;background:var(--accent);color:#0d1117;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Unlock</button>
+      </div>
+      <div id="dl-pw-error" style="color:var(--red);font-size:13px;margin-top:10px;display:none;">Incorrect password.</div>
+    </div>
   </div>
 </div>
 
@@ -492,6 +498,15 @@ function tsToDate(ts) {{ var d=new Date(ts*1000); return d.getFullYear()+'-'+pad
 function dateToTs(str) {{ if(!str)return 0; var p=str.split('-'); return Math.floor(new Date(Date.UTC(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]))).getTime()/1000); }}
 function pad2(n) {{ return n<10?'0'+n:''+n; }}
 
+// ========== DOWNLOAD GUARD ==========
+function guardedExport(exportFn) {{
+  if (DOWNLOAD_UNLOCKED || !DOWNLOAD_ENCRYPTED) {{
+    exportFn();
+  }} else {{
+    showDownloadModal(exportFn);
+  }}
+}}
+
 // ========== CSV EXPORT ==========
 function exportCSV() {{
   var gran=document.getElementById('sel-gran').value;
@@ -551,6 +566,14 @@ function downloadFile(content,filename,mime) {{
   document.body.appendChild(a);a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}}
+// ========== SERVICE WORKER REGISTRATION ==========
+if ('serviceWorker' in navigator) {{
+  navigator.serviceWorker.register('sw.js').then(function(reg) {{
+    console.log('SW registered:', reg.scope);
+  }}).catch(function(err) {{
+    console.log('SW registration failed:', err);
+  }});
 }}
 </script>
 </body>
