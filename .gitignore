@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.fred_cache/
+.cache_libs/
+.DS_Store

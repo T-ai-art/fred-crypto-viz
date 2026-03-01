@@ -1,0 +1,67 @@
+name: Update Crypto Data
+
+on:
+  schedule:
+    - cron: '0 0,6,12,18 * * *'  # Every 6 hours
+  workflow_dispatch:
+    inputs:
+      days_override:
+        description: 'Override days for all granularities (empty = use auto plan)'
+        required: false
+        default: ''
+      assets:
+        description: 'Assets to fetch'
+        required: false
+        default: 'xaut,btc'
+      xaut_sources:
+        description: 'XAUt sources'
+        required: false
+        default: 'okx,bitfinex'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch data and generate HTML
+        run: |
+          cd fred_crypto_viz
+
+          DAYS_FLAG=""
+          if [ -n "${{ github.event.inputs.days_override }}" ]; then
+            DAYS_FLAG="--days ${{ github.event.inputs.days_override }}"
+          fi
+
+          python3 src/fred_cli.py \
+            --auto \
+            --assets "${{ github.event.inputs.assets || 'xaut,btc' }}" \
+            --xaut-sources "${{ github.event.inputs.xaut_sources || 'okx,bitfinex' }}" \
+            $DAYS_FLAG \
+            --outdir docs/ \
+            --cdn \
+            --no-open
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add fred_crypto_viz/docs/
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update crypto data: $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi

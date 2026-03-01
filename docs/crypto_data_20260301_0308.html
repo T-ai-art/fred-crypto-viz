@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crypto Asset Data Explorer | XAUt &amp; BTC</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
+  --gold: #f0b90b; --gold-dim: #f0b90b80; --btc: #f7931a; --btc-dim: #f7931a80;
+  --bitfinex: #16b979; --bitfinex-dim: #16b97980;
+  --green: #3fb950; --red: #f85149;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
+.container { max-width:1400px; margin:0 auto; padding:16px; }
+header { padding:24px 0 16px; border-bottom:1px solid var(--border); margin-bottom:16px; }
+header h1 { font-size:24px; font-weight:600; color:#f0f6fc; }
+header p { color:var(--text-dim); font-size:14px; margin-top:4px; }
+
+/* Controls */
+.controls { display:flex; flex-wrap:wrap; gap:12px; padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; align-items:center; }
+.ctrl-group { display:flex; align-items:center; gap:8px; }
+.ctrl-group label { font-size:13px; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap; }
+.ctrl-group input[type="checkbox"] { accent-color:var(--accent); width:16px; height:16px; }
+.ctrl-group .cb-label { font-size:14px; cursor:pointer; user-select:none; }
+.ctrl-group select, .ctrl-group input[type="date"] {
+  background:var(--bg); color:var(--text); border:1px solid var(--border);
+  border-radius:4px; padding:4px 8px; font-size:13px;
+}
+.btn { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:4px 12px; font-size:13px; cursor:pointer; transition:0.15s; }
+.btn:hover { background:var(--border); }
+.btn.active { background:var(--accent); color:#0d1117; border-color:var(--accent); }
+.btn-export { background:#238636; color:#fff; border-color:#238636; }
+.btn-export:hover { background:#2ea043; }
+.sep { width:1px; height:28px; background:var(--border); }
+
+/* Stats */
+.stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
+.stat-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; }
+.stat-card .label { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; }
+.stat-card .value { font-size:22px; font-weight:600; margin-top:4px; }
+.stat-card .change { font-size:13px; margin-top:2px; }
+.stat-card .change.up { color:var(--green); }
+.stat-card .change.down { color:var(--red); }
+
+/* Chart */
+.chart-box { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+.chart-box h3 { font-size:14px; color:var(--text-dim); margin-bottom:12px; }
+.chart-wrap { position:relative; height:500px; width:100%; }
+
+/* Data table */
+.data-info { font-size:12px; color:var(--text-dim); padding:8px 0; }
+
+/* Footer */
+footer { border-top:1px solid var(--border); padding:16px 0; margin-top:16px; font-size:12px; color:var(--text-dim); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+footer a { color:var(--accent); text-decoration:none; }
+
+/* Responsive */
+@media (max-width:768px) {
+  .controls { flex-direction:column; align-items:stretch; }
+  .sep { display:none; }
+  .chart-wrap { height:350px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Crypto Asset Data Explorer</h1>
+    <p>XAUt (Tether Gold) &amp; BTC &mdash; Multi-Source Historical Data Visualization &amp; Download</p>
+  </header>
+
+  <div class="controls">
+    <div class="ctrl-group">
+      <label>Assets:</label>
+      <input type="checkbox" id="cb-xaut" checked><span class="cb-label" onclick="document.getElementById('cb-xaut').click()"> XAUt</span>
+      <input type="checkbox" id="cb-btc" checked><span class="cb-label" onclick="document.getElementById('cb-btc').click()"> BTC</span>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group">
+      <label>XAUt Source:</label>
+      <input type="checkbox" id="cb-okx" checked><span class="cb-label" onclick="document.getElementById('cb-okx').click()"> OKX</span>
+      <input type="checkbox" id="cb-bitfinex" checked><span class="cb-label" onclick="document.getElementById('cb-bitfinex').click()"> Bitfinex</span>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group">
+      <label>Period:</label>
+      <input type="date" id="date-start">
+      <span style="color:var(--text-dim)">to</span>
+      <input type="date" id="date-end">
+      <button class="btn" onclick="setPeriod(7)">1W</button>
+      <button class="btn" onclick="setPeriod(30)">1M</button>
+      <button class="btn" onclick="setPeriod(90)">3M</button>
+      <button class="btn" onclick="setPeriod(0)">ALL</button>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group">
+      <label>Granularity:</label>
+      <select id="sel-gran" onchange="render()">
+        <option value="1m">1 min</option>
+        <option value="5m">5 min</option>
+        <option value="15m">15 min</option>
+        <option value="1H" selected>1 hour</option>
+        <option value="4H">4 hours</option>
+        <option value="1D">1 day</option>
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group">
+      <button class="btn btn-export" onclick="exportCSV()">CSV</button>
+      <button class="btn btn-export" onclick="exportXLSX()">Excel</button>
+    </div>
+  </div>
+
+  <div class="stats" id="stats-container"></div>
+
+  <div class="chart-box">
+    <h3 id="chart-title">Price Chart</h3>
+    <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
+  </div>
+
+  <div class="data-info" id="data-info"></div>
+
+  <footer>
+    <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a></div>
+    <div>Last updated: 2026-03-01 03:08 UTC</div>
+  </footer>
+</div>
+
+<script>
+// ========== EMBEDDED DATA ==========
+var DATA = {"xaut_okx_1H":[[1772078400,5166.8,5172.2,5166.5,5167.2,79.580771],[1772082000,5167.2,5178.3,5166.5,5170.9,166.777992],[1772085600,5171.0,5173.0,5165.6,5166.4,94.021078],[1772089200,5166.5,5168.6,5158.2,5165.5,202.683796],[1772092800,5165.6,5169.8,5148.5,5156.9,251.684243],[1772096400,5157.0,5167.6,5152.9,5165.0,191.779098],[1772100000,5165.0,5167.1,5148.6,5149.9,98.358711],[1772103600,5149.9,5156.8,5141.9,5144.0,85.003627],[1772107200,5144.1,5166.2,5138.5,5162.7,174.527152],[1772110800,5162.9,5163.3,5146.5,5149.4,84.380648],[1772114400,5147.6,5154.9,5126.2,5147.6,220.373642],[1772118000,5146.7,5172.4,5115.0,5165.0,387.771493],[1772121600,5165.1,5166.3,5154.2,5159.9,265.584445],[1772125200,5161.2,5169.3,5144.4,5148.3,74.563689],[1772128800,5148.6,5163.8,5144.1,5159.6,133.854272],[1772132400,5159.8,5172.1,5159.8,5166.7,137.957845],[1772136000,5166.4,5180.0,5166.4,5174.8,157.803609],[1772139600,5174.8,5178.7,5166.1,5166.1,38.712456],[1772143200,5166.2,5169.6,5161.0,5165.0,26.322516],[1772146800,5165.0,5168.9,5158.6,5165.2,26.007323],[1772150400,5165.5,5174.4,5154.1,5158.7,50.569118],[1772154000,5158.6,5173.9,5152.0,5172.8,79.811327],[1772157600,5172.9,5177.7,5157.9,5165.5,54.88843],[1772161200,5165.5,5172.6,5164.8,5170.8,18.154883],[1772164800,5169.6,5172.1,5166.9,5166.9,31.060224],[1772168400,5166.9,5181.8,5166.9,5181.8,54.71166],[1772172000,5181.7,5182.3,5170.7,5170.8,57.051077],[1772175600,5170.8,5173.9,5162.6,5163.9,83.92749],[1772179200,5163.8,5167.6,5162.3,5164.9,56.992267],[1772182800,5164.7,5166.8,5159.0,5160.0,78.135365],[1772186400,5160.0,5165.0,5154.0,5163.3,85.532182],[1772190000,5163.3,5171.6,5158.1,5171.5,109.617338],[1772193600,5171.7,5177.9,5168.2,5173.6,554.795461],[1772197200,5173.6,5230.0,5173.6,5210.2,892.429709],[1772200800,5210.3,5222.8,5201.0,5209.7,594.347351],[1772204400,5210.4,5234.4,5202.9,5228.1,638.737174],[1772208000,5228.1,5246.2,5211.9,5216.0,702.678129],[1772211600,5216.1,5223.6,5210.7,5222.5,146.629559],[1772215200,5222.5,5234.4,5212.5,5234.4,144.641779],[1772218800,5234.4,5243.8,5230.1,5243.0,202.270506],[1772222400,5242.3,5255.3,5239.0,5252.0,235.054136],[1772226000,5252.0,5267.4,5247.1,5265.7,112.488411],[1772229600,5265.8,5274.9,5265.1,5268.1,107.306368],[1772233200,5268.0,5268.1,5257.8,5258.5,54.950352],[1772236800,5258.5,5262.9,5255.5,5262.2,80.323327],[1772240400,5262.2,5274.5,5262.2,5270.3,109.438026],[1772244000,5270.4,5275.0,5270.4,5270.6,82.339895],[1772247600,5270.6,5276.0,5270.5,5276.0,62.506114],[1772251200,5275.8,5278.8,5275.2,5278.5,69.186643],[1772254800,5278.5,5283.7,5277.8,5283.7,84.679914],[1772258400,5283.7,5317.9,5277.2,5306.2,2620.659461],[1772262000,5306.2,5320.0,5287.1,5314.0,4218.135388],[1772265600,5314.2,5369.4,5312.2,5367.0,1672.957418],[1772269200,5366.6,5445.0,5356.7,5434.6,2353.167156],[1772272800,5434.5,5465.1,5390.4,5412.8,2839.901402],[1772276400,5412.5,5424.6,5350.3,5371.4,1741.440603],[1772280000,5371.4,5415.9,5316.9,5326.5,1872.320905],[1772283600,5326.5,5360.0,5297.9,5303.8,3707.367128],[1772287200,5303.8,5339.8,5296.2,5337.6,2208.977644],[1772290800,5336.6,5360.0,5325.0,5325.5,1098.699234],[1772294400,5325.4,5345.4,5321.5,5336.0,1140.175951],[1772298000,5336.3,5340.1,5310.0,5333.8,984.133895],[1772301600,5333.8,5339.0,5311.4,5318.5,296.148289],[1772305200,5318.4,5338.0,5309.3,5311.8,296.740166],[1772308800,5311.9,5324.8,5295.4,5299.5,429.841056],[1772312400,5299.6,5331.4,5299.3,5319.6,506.597861],[1772316000,5319.4,5320.9,5304.0,5311.9,212.69908],[1772319600,5311.9,5314.9,5301.5,5305.4,335.501949],[1772323200,5304.5,5324.4,5302.4,5317.7,297.871327],[1772326800,5317.0,5317.8,5287.0,5288.8,883.538926],[1772330400,5288.9,5290.9,5260.0,5269.4,690.20588],[1772334000,5269.2,5271.9,5256.4,5256.5,121.669081]],"xaut_bitfinex_1H":[],"btc_binance_1H":[[1772078400,68216.87,68860.0,68179.62,68571.36,587.55874],[1772082000,68571.36,68571.37,68127.58,68443.81,486.81983],[1772085600,68443.82,68522.0,68042.9,68176.75,618.63359],[1772089200,68176.75,68290.18,67817.87,67825.04,840.14406],[1772092800,67825.05,68236.0,67792.0,67954.01,761.69108],[1772096400,67954.0,68644.59,67933.25,68589.41,1095.31619],[1772100000,68589.41,68722.64,68257.64,68301.62,688.66072],[1772103600,68301.61,68404.25,67965.46,68051.31,722.94931],[1772107200,68051.3,68303.83,68009.88,68171.56,642.07881],[1772110800,68171.55,68213.98,67848.69,67905.35,698.96783],[1772114400,67905.34,68272.21,67264.22,67697.74,1769.26733],[1772118000,67696.89,67743.36,66761.16,67382.0,2095.8814],[1772121600,67382.0,67566.85,66500.0,66643.55,2050.20093],[1772125200,66643.56,67044.1,66600.46,66826.8,885.82755],[1772128800,66826.8,67373.9,66575.73,67310.53,1058.47196],[1772132400,67310.53,67903.12,67285.99,67589.22,1235.95013],[1772136000,67589.21,67831.11,67269.42,67414.07,597.88987],[1772139600,67414.07,67575.97,67150.14,67463.65,299.84732],[1772143200,67463.65,67630.22,67301.75,67572.3,291.6336],[1772146800,67572.3,67656.11,67390.65,67485.18,314.51737],[1772150400,67485.19,67537.84,67000.0,67226.5,462.9103],[1772154000,67226.5,67398.86,66885.0,67352.26,818.15438],[1772157600,67352.26,67546.15,67263.56,67266.58,463.09611],[1772161200,67266.58,67712.16,67099.71,67600.84,415.67371],[1772164800,67600.84,68216.8,67578.67,67747.49,1318.53811],[1772168400,67747.49,67924.0,67683.3,67724.99,411.56603],[1772172000,67725.0,67823.9,67525.46,67658.14,398.60368],[1772175600,67658.14,67774.48,67459.3,67690.6,896.56486],[1772179200,67690.6,68079.83,67655.86,67926.24,712.98047],[1772182800,67926.25,68149.93,67284.22,67355.73,1377.2902],[1772186400,67355.72,67416.78,66574.0,66604.91,1414.83211],[1772190000,66604.9,66778.68,65960.01,66126.99,1399.59256],[1772193600,66126.99,66217.42,65734.71,65928.01,1855.03329],[1772197200,65928.01,66344.9,65649.34,66270.55,1278.55317],[1772200800,66270.55,66334.87,65686.64,65887.59,1404.23206],[1772204400,65887.59,66311.11,65845.18,66095.4,957.11978],[1772208000,66095.4,66121.03,65462.93,65475.21,1135.56487],[1772211600,65475.21,65765.06,65113.72,65703.19,1265.39709],[1772215200,65703.18,65788.07,65228.33,65314.76,623.00837],[1772218800,65314.76,65457.35,65172.6,65392.18,851.95591],[1772222400,65392.18,65666.66,65392.18,65594.67,444.86468],[1772226000,65594.67,65749.94,65400.0,65527.59,282.6564],[1772229600,65527.59,65673.33,64914.46,65637.99,713.5349],[1772233200,65638.0,65953.2,65551.67,65872.1,326.8612],[1772236800,65872.09,66025.52,65721.13,65942.0,334.42449],[1772240400,65942.01,65971.93,65743.71,65770.36,267.81274],[1772244000,65770.36,66018.85,65761.94,65961.13,204.09288],[1772247600,65961.13,65982.34,65745.39,65797.42,239.41397],[1772251200,65797.42,65818.44,65488.0,65663.2,311.53682],[1772254800,65663.21,65729.65,65500.0,65591.03,300.20395],[1772258400,65591.03,65591.04,63030.0,63216.01,3175.19445],[1772262000,63216.01,64327.22,63038.0,63826.0,2127.97927],[1772265600,63825.99,63877.09,63411.39,63473.28,1118.13838],[1772269200,63473.27,64005.35,63372.1,63658.54,737.11739],[1772272800,63658.55,64053.93,63452.64,64010.39,1633.42712],[1772276400,64010.38,64307.44,63791.25,63844.2,1245.63976],[1772280000,63844.2,64082.66,63827.2,64017.19,474.84169],[1772283600,64017.18,65216.97,63888.89,65106.44,1748.13055],[1772287200,65106.45,65360.51,64278.5,64435.61,1331.97244],[1772290800,64435.62,65020.75,64200.0,64841.18,731.53889],[1772294400,64841.17,65206.25,64681.81,65094.3,500.23365],[1772298000,65094.29,65555.0,64828.03,65442.62,595.58409],[1772301600,65442.61,66157.61,65185.7,65911.84,830.58148],[1772305200,65911.83,66666.65,65602.65,66362.01,1072.73124],[1772308800,66362.01,67151.68,66190.61,66959.62,840.13263],[1772312400,66959.63,67055.56,66368.42,66723.22,934.75984],[1772316000,66723.23,67760.0,66608.82,67103.64,1310.09118],[1772319600,67103.63,67210.0,66733.73,66973.26,483.13759],[1772323200,66973.26,67121.8,66620.5,66791.29,560.35194],[1772326800,66791.29,67703.32,66042.72,67339.36,1630.19028],[1772330400,67339.36,68199.99,67339.36,67620.65,1861.8227],[1772334000,67620.65,67702.51,67613.89,67668.71,77.93146]]};
+var META = {"generated_at":"2026-03-01 03:08 UTC","assets":["xaut","btc"],"xaut_sources":["okx","bitfinex"],"granularities":["1H"],"total_candles":144};
+
+// ========== APP STATE ==========
+var chart = null;
+var COLORS = {
+  xaut_okx:      {line:'#f0b90b',fill:'rgba(240,185,11,0.08)',label:'XAUt (OKX)'},
+  xaut_bitfinex: {line:'#16b979',fill:'rgba(22,185,121,0.08)',label:'XAUt (Bitfinex)'},
+  btc_binance:   {line:'#f7931a',fill:'rgba(247,147,26,0.08)',label:'BTC (Binance)'},
+};
+
+// ========== INIT ==========
+document.addEventListener('DOMContentLoaded', function() {
+  // Set date range from data
+  var allTs = [];
+  for (var k in DATA) {
+    var arr = DATA[k];
+    if (arr && arr.length > 0) {
+      allTs.push(arr[0][0], arr[arr.length-1][0]);
+    }
+  }
+  if (allTs.length > 0) {
+    var minTs = Math.min.apply(null, allTs);
+    var maxTs = Math.max.apply(null, allTs);
+    document.getElementById('date-start').value = tsToDate(minTs);
+    document.getElementById('date-end').value = tsToDate(maxTs);
+  }
+
+  // Attach listeners
+  ['cb-xaut','cb-btc','cb-okx','cb-bitfinex'].forEach(function(id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+  document.getElementById('date-start').addEventListener('change', render);
+  document.getElementById('date-end').addEventListener('change', render);
+
+  // Check available granularities
+  var selGran = document.getElementById('sel-gran');
+  var opts = selGran.options;
+  for (var i = 0; i < opts.length; i++) {
+    var g = opts[i].value;
+    var hasData = false;
+    for (var k in DATA) {
+      if (k.endsWith('_' + g) && DATA[k] && DATA[k].length > 0) {
+        hasData = true;
+        break;
+      }
+    }
+    if (!hasData) {
+      opts[i].disabled = true;
+      opts[i].text += ' (no data)';
+    }
+  }
+
+  render();
+});
+
+// ========== PERIOD PRESETS ==========
+function setPeriod(days) {
+  var allTs = [];
+  for (var k in DATA) {
+    var arr = DATA[k];
+    if (arr && arr.length > 0) allTs.push(arr[arr.length-1][0]);
+  }
+  if (allTs.length === 0) return;
+  var maxTs = Math.max.apply(null, allTs);
+  document.getElementById('date-end').value = tsToDate(maxTs);
+  if (days === 0) {
+    // ALL
+    var minTs = Infinity;
+    for (var k in DATA) {
+      var arr = DATA[k];
+      if (arr && arr.length > 0 && arr[0][0] < minTs) minTs = arr[0][0];
+    }
+    document.getElementById('date-start').value = tsToDate(minTs);
+  } else {
+    document.getElementById('date-start').value = tsToDate(maxTs - days * 86400);
+  }
+  render();
+}
+
+// ========== MAIN RENDER ==========
+function render() {
+  var gran = document.getElementById('sel-gran').value;
+  var startTs = dateToTs(document.getElementById('date-start').value);
+  var endTs = dateToTs(document.getElementById('date-end').value) + 86400; // include end day
+
+  var showXaut = document.getElementById('cb-xaut').checked;
+  var showBtc = document.getElementById('cb-btc').checked;
+  var showOkx = document.getElementById('cb-okx').checked;
+  var showBfx = document.getElementById('cb-bitfinex').checked;
+
+  var datasets = [];
+  var hasLeftAxis = false;
+  var hasRightAxis = false;
+
+  // XAUt sources
+  if (showXaut && showOkx) {
+    var d = getFiltered('xaut_okx_' + gran, startTs, endTs);
+    if (d.length > 0) {
+      datasets.push(makeDataset('xaut_okx', d, 'y', false));
+      hasLeftAxis = true;
+    }
+  }
+  if (showXaut && showBfx) {
+    var d = getFiltered('xaut_bitfinex_' + gran, startTs, endTs);
+    if (d.length > 0) {
+      datasets.push(makeDataset('xaut_bitfinex', d, 'y', showOkx));
+      hasLeftAxis = true;
+    }
+  }
+  // BTC
+  if (showBtc) {
+    var d = getFiltered('btc_binance_' + gran, startTs, endTs);
+    if (d.length > 0) {
+      var axisId = hasLeftAxis ? 'y1' : 'y';
+      datasets.push(makeDataset('btc_binance', d, axisId, false));
+      if (axisId === 'y1') hasRightAxis = true;
+      else hasLeftAxis = true;
+    }
+  }
+
+  // Update chart
+  if (chart) chart.destroy();
+  var ctx = document.getElementById('main-chart').getContext('2d');
+
+  var totalDays = (endTs - startTs) / 86400;
+  var timeUnit = totalDays > 90 ? 'week' : (totalDays > 7 ? 'day' : 'hour');
+
+  var scales = {
+    x: {
+      type: 'time',
+      time: { unit: timeUnit },
+      grid: { color: 'rgba(48,54,61,0.6)' },
+      ticks: { color: '#8b949e', maxTicksLimit: 12 }
+    }
+  };
+
+  if (hasLeftAxis || !hasRightAxis) {
+    scales.y = {
+      position: 'left',
+      title: { display: true, text: showXaut ? 'XAUt (USD)' : 'BTC (USD)', color: '#8b949e' },
+      grid: { color: 'rgba(48,54,61,0.6)' },
+      ticks: { color: '#8b949e', callback: function(v) { return '$' + v.toLocaleString(); } }
+    };
+  }
+  if (hasRightAxis) {
+    scales.y1 = {
+      position: 'right',
+      title: { display: true, text: 'BTC (USD)', color: '#8b949e' },
+      grid: { drawOnChartArea: false },
+      ticks: { color: '#8b949e', callback: function(v) { return '$' + v.toLocaleString(); } }
+    };
+  }
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets: datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+            }
+          }
+        },
+        legend: {
+          labels: { color: '#c9d1d9', usePointStyle: true, pointStyle: 'line' }
+        }
+      },
+      scales: scales,
+      elements: {
+        point: { radius: 0, hoverRadius: 4 },
+        line: { tension: 0, borderWidth: 1.5 }
+      }
+    }
+  });
+
+  // Update stats
+  updateStats(gran, startTs, endTs, showXaut, showBtc, showOkx, showBfx);
+
+  // Update info
+  var totalPoints = datasets.reduce(function(s,d) { return s + d.data.length; }, 0);
+  document.getElementById('data-info').textContent =
+    'Showing ' + totalPoints + ' data points | Granularity: ' + gran +
+    ' | Period: ' + document.getElementById('date-start').value +
+    ' to ' + document.getElementById('date-end').value;
+
+  // Update title
+  var parts = [];
+  if (showXaut) parts.push('XAUt');
+  if (showBtc) parts.push('BTC');
+  document.getElementById('chart-title').textContent = parts.join(' & ') + ' — ' + gran + ' Chart';
+}
+
+// ========== DATASET FACTORY ==========
+function makeDataset(key, data, yAxisID, dashed) {
+  var c = COLORS[key] || {line:'#888',fill:'rgba(128,128,128,0.1)',label:key};
+  return {
+    label: c.label,
+    data: data.map(function(d) { return {x: new Date(d[0]*1000), y: d[4]}; }),
+    borderColor: c.line,
+    backgroundColor: c.fill,
+    borderDash: dashed ? [6,3] : [],
+    fill: false,
+    yAxisID: yAxisID,
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    borderWidth: 1.5,
+  };
+}
+
+// ========== STATS ==========
+function updateStats(gran, startTs, endTs, showXaut, showBtc, showOkx, showBfx) {
+  var container = document.getElementById('stats-container');
+  container.innerHTML = '';
+
+  var cards = [];
+  if (showXaut && showOkx) cards.push({key:'xaut_okx_'+gran, name:'XAUt (OKX)', color:'var(--gold)'});
+  if (showXaut && showBfx) cards.push({key:'xaut_bitfinex_'+gran, name:'XAUt (Bitfinex)', color:'var(--bitfinex)'});
+  if (showBtc) cards.push({key:'btc_binance_'+gran, name:'BTC (Binance)', color:'var(--btc)'});
+
+  cards.forEach(function(c) {
+    var d = getFiltered(c.key, startTs, endTs);
+    if (d.length === 0) return;
+    var first = d[0][4], last = d[d.length-1][4];
+    var high = Math.max.apply(null, d.map(function(x){return x[2];}));
+    var low = Math.min.apply(null, d.map(function(x){return x[3];}));
+    var chg = ((last - first) / first * 100);
+    var chgClass = chg >= 0 ? 'up' : 'down';
+    var chgSign = chg >= 0 ? '+' : '';
+
+    container.innerHTML +=
+      '<div class="stat-card" style="border-top:3px solid '+c.color+'">' +
+      '<div class="label">' + c.name + '</div>' +
+      '<div class="value">$' + last.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>' +
+      '<div class="change '+chgClass+'">' + chgSign + chg.toFixed(2) + '% &nbsp; H:$' + high.toLocaleString(undefined,{maximumFractionDigits:2}) + ' L:$' + low.toLocaleString(undefined,{maximumFractionDigits:2}) + '</div>' +
+      '<div class="label" style="margin-top:6px">' + d.length + ' candles</div>' +
+      '</div>';
+  });
+}
+
+// ========== DATA HELPERS ==========
+function getFiltered(key, startTs, endTs) {
+  var arr = DATA[key];
+  if (!arr) return [];
+  return arr.filter(function(d) { return d[0] >= startTs && d[0] <= endTs; });
+}
+
+function tsToDate(ts) {
+  var d = new Date(ts * 1000);
+  return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
+}
+
+function dateToTs(str) {
+  if (!str) return 0;
+  var parts = str.split('-');
+  return Math.floor(new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]))).getTime() / 1000);
+}
+
+function pad2(n) { return n < 10 ? '0'+n : ''+n; }
+
+// ========== CSV EXPORT ==========
+function exportCSV() {
+  var gran = document.getElementById('sel-gran').value;
+  var startTs = dateToTs(document.getElementById('date-start').value);
+  var endTs = dateToTs(document.getElementById('date-end').value) + 86400;
+
+  // Collect active series
+  var series = [];
+  if (document.getElementById('cb-xaut').checked && document.getElementById('cb-okx').checked)
+    series.push('xaut_okx_' + gran);
+  if (document.getElementById('cb-xaut').checked && document.getElementById('cb-bitfinex').checked)
+    series.push('xaut_bitfinex_' + gran);
+  if (document.getElementById('cb-btc').checked)
+    series.push('btc_binance_' + gran);
+
+  // Merge on timestamp
+  var tsMap = {};
+  series.forEach(function(key) {
+    var d = getFiltered(key, startTs, endTs);
+    d.forEach(function(row) {
+      if (!tsMap[row[0]]) tsMap[row[0]] = {};
+      tsMap[row[0]][key] = row;
+    });
+  });
+
+  var timestamps = Object.keys(tsMap).map(Number).sort(function(a,b){return a-b;});
+
+  // Build CSV
+  var headers = ['timestamp','datetime'];
+  series.forEach(function(key) {
+    var base = key.replace('_'+gran, '');
+    headers.push(base+'_open', base+'_high', base+'_low', base+'_close', base+'_volume');
+  });
+
+  var lines = [headers.join(',')];
+  timestamps.forEach(function(ts) {
+    var row = [ts, new Date(ts*1000).toISOString()];
+    series.forEach(function(key) {
+      var d = tsMap[ts][key];
+      if (d) {
+        row.push(d[1], d[2], d[3], d[4], d[5]);
+      } else {
+        row.push('','','','','');
+      }
+    });
+    lines.push(row.join(','));
+  });
+
+  downloadFile(lines.join('\n'), 'crypto_data_' + gran + '.csv', 'text/csv');
+}
+
+// ========== XLSX EXPORT ==========
+function exportXLSX() {
+  if (typeof XLSX === 'undefined') {
+    alert('SheetJS library not loaded. Please check your internet connection.');
+    return;
+  }
+  var gran = document.getElementById('sel-gran').value;
+  var startTs = dateToTs(document.getElementById('date-start').value);
+  var endTs = dateToTs(document.getElementById('date-end').value) + 86400;
+
+  var wb = XLSX.utils.book_new();
+
+  // Add sheet per source
+  var sheetConfigs = [];
+  if (document.getElementById('cb-xaut').checked && document.getElementById('cb-okx').checked)
+    sheetConfigs.push({key:'xaut_okx_'+gran, name:'XAUt_OKX'});
+  if (document.getElementById('cb-xaut').checked && document.getElementById('cb-bitfinex').checked)
+    sheetConfigs.push({key:'xaut_bitfinex_'+gran, name:'XAUt_Bitfinex'});
+  if (document.getElementById('cb-btc').checked)
+    sheetConfigs.push({key:'btc_binance_'+gran, name:'BTC_Binance'});
+
+  sheetConfigs.forEach(function(cfg) {
+    var d = getFiltered(cfg.key, startTs, endTs);
+    var rows = [['Timestamp','DateTime','Open','High','Low','Close','Volume']];
+    d.forEach(function(r) {
+      rows.push([r[0], new Date(r[0]*1000).toISOString(), r[1], r[2], r[3], r[4], r[5]]);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    // Column widths
+    ws['!cols'] = [{wch:12},{wch:24},{wch:12},{wch:12},{wch:12},{wch:12},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws, cfg.name);
+  });
+
+  // Merged sheet
+  var series = sheetConfigs.map(function(c){return c.key;});
+  var tsMap = {};
+  series.forEach(function(key) {
+    var d = getFiltered(key, startTs, endTs);
+    d.forEach(function(row) {
+      if (!tsMap[row[0]]) tsMap[row[0]] = {};
+      tsMap[row[0]][key] = row;
+    });
+  });
+  var timestamps = Object.keys(tsMap).map(Number).sort(function(a,b){return a-b;});
+
+  var mHeaders = ['Timestamp','DateTime'];
+  sheetConfigs.forEach(function(c) {
+    var base = c.name;
+    mHeaders.push(base+'_Open', base+'_High', base+'_Low', base+'_Close', base+'_Volume');
+  });
+  var mRows = [mHeaders];
+  timestamps.forEach(function(ts) {
+    var row = [ts, new Date(ts*1000).toISOString()];
+    series.forEach(function(key) {
+      var d = tsMap[ts][key];
+      if (d) { row.push(d[1], d[2], d[3], d[4], d[5]); }
+      else { row.push('','','','',''); }
+    });
+    mRows.push(row);
+  });
+  var mWs = XLSX.utils.aoa_to_sheet(mRows);
+  XLSX.utils.book_append_sheet(wb, mWs, 'Merged');
+
+  XLSX.writeFile(wb, 'crypto_data_' + gran + '.xlsx');
+}
+
+// ========== DOWNLOAD HELPER ==========
+function downloadFile(content, filename, mime) {
+  var blob = new Blob([content], {type: mime});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
