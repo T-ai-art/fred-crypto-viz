@@ -87,8 +87,6 @@ def build_html(all_data, meta, cdn=True, password=None):
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>'''
 
     # ===== Data embedding strategy =====
-    # Chart data is always plaintext (viewable by anyone)
-    # Download data is encrypted when password is set
     data_embed = f'''
 var DATA = {data_json};
 var META = {meta_json};'''
@@ -107,7 +105,6 @@ var DOWNLOAD_UNLOCKED = false;'''
 var DOWNLOAD_ENCRYPTED = null;
 var DOWNLOAD_UNLOCKED = true;'''
 
-    # No lock screen needed — chart is always visible
     password_screen = ''
     main_display = ''
 
@@ -154,7 +151,6 @@ async function unlockDownload() {
       {name: "AES-GCM", iv: ivBuf}, aesKey, ctBuf
     );
 
-    // Success — password correct, unlock downloads for this session
     DOWNLOAD_UNLOCKED = true;
     closeDownloadModal();
     if (_pendingExportFn) { _pendingExportFn(); _pendingExportFn = null; }
@@ -184,7 +180,7 @@ document.addEventListener('DOMContentLoaded', function() { initApp(); });
 <meta name="theme-color" content="#0d1117">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Crypto Asset Data Explorer | XAUt &amp; BTC</title>
+<title>Crypto Asset Data Explorer | Tokenized Assets</title>
 {chartjs_tag}
 <style>
 :root {{
@@ -192,6 +188,7 @@ document.addEventListener('DOMContentLoaded', function() { initApp(); });
   --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
   --gold: #f0b90b; --gold-dim: #f0b90b80; --btc: #f7931a; --btc-dim: #f7931a80;
   --bitfinex: #16b979; --bitfinex-dim: #16b97980;
+  --spyx: #a855f7; --spyx-dim: #a855f780;
   --green: #3fb950; --red: #f85149;
 }}
 * {{ margin:0; padding:0; box-sizing:border-box; }}
@@ -203,8 +200,9 @@ header p {{ color:var(--text-dim); font-size:14px; margin-top:4px; }}
 .controls {{ display:flex; flex-wrap:wrap; gap:12px; padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; align-items:center; }}
 .ctrl-group {{ display:flex; align-items:center; gap:8px; }}
 .ctrl-group label {{ font-size:13px; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap; }}
-.ctrl-group input[type="checkbox"] {{ accent-color:var(--accent); width:16px; height:16px; }}
+.ctrl-group input[type="checkbox"], .ctrl-group input[type="radio"] {{ accent-color:var(--accent); width:16px; height:16px; }}
 .ctrl-group .cb-label {{ font-size:14px; cursor:pointer; user-select:none; }}
+.ctrl-group .cb-label.disabled {{ color:var(--text-dim); opacity:0.4; cursor:not-allowed; }}
 .ctrl-group select, .ctrl-group input[type="date"] {{
   background:var(--bg); color:var(--text); border:1px solid var(--border);
   border-radius:4px; padding:4px 8px; font-size:13px;
@@ -241,20 +239,26 @@ footer a {{ color:var(--accent); text-decoration:none; }}
   <div id="main-content" {main_display}>
   <header>
     <h1>Crypto Asset Data Explorer</h1>
-    <p>XAUt (Tether Gold) &amp; BTC &mdash; Multi-Source Historical Data Visualization &amp; Download</p>
+    <p>Tokenized Gold (XAUt) &amp; Right-Axis Asset &mdash; Multi-Source Historical Data</p>
   </header>
 
   <div class="controls">
     <div class="ctrl-group">
-      <label>Assets:</label>
+      <label>Left Axis:</label>
       <input type="checkbox" id="cb-xaut" checked><span class="cb-label" onclick="document.getElementById('cb-xaut').click()"> XAUt</span>
-      <input type="checkbox" id="cb-btc" checked><span class="cb-label" onclick="document.getElementById('cb-btc').click()"> BTC</span>
     </div>
     <div class="sep"></div>
     <div class="ctrl-group">
       <label>XAUt Source:</label>
       <input type="checkbox" id="cb-okx" checked><span class="cb-label" onclick="document.getElementById('cb-okx').click()"> OKX</span>
       <input type="checkbox" id="cb-bitfinex" checked><span class="cb-label" onclick="document.getElementById('cb-bitfinex').click()"> Bitfinex</span>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group">
+      <label>Right Axis:</label>
+      <input type="radio" name="right-axis" id="rb-btc" value="btc" checked onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-btc').click()"> BTC</span>
+      <input type="radio" name="right-axis" id="rb-spyx" value="spyx" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-spyx').click()"> SPYx</span>
+      <input type="radio" name="right-axis" id="rb-none" value="none" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-none').click()"> None</span>
     </div>
     <div class="sep"></div>
     <div class="ctrl-group">
@@ -281,8 +285,8 @@ footer a {{ color:var(--accent); text-decoration:none; }}
     </div>
     <div class="sep"></div>
     <div class="ctrl-group">
-      <button class="btn btn-export" onclick="guardedExport(exportCSV)">CSV</button>
-      <button class="btn btn-export" onclick="guardedExport(exportXLSX)">Excel</button>
+      <button class="btn btn-export" onclick="guardedExport(exportCSV)">CSV (All)</button>
+      <button class="btn btn-export" onclick="guardedExport(exportXLSX)">Excel (All)</button>
     </div>
   </div>
 
@@ -296,7 +300,7 @@ footer a {{ color:var(--accent); text-decoration:none; }}
   <div class="data-info" id="data-info"></div>
 
   <footer>
-    <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a></div>
+    <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a> | <a href="https://www.mexc.com" target="_blank">MEXC</a></div>
     <div>Last updated: {generated_at}</div>
   </footer>
   </div>
@@ -331,9 +335,25 @@ var COLORS = {{
   xaut_okx:      {{line:'#f0b90b',fill:'rgba(240,185,11,0.08)',label:'XAUt (OKX)'}},
   xaut_bitfinex: {{line:'#16b979',fill:'rgba(22,185,121,0.08)',label:'XAUt (Bitfinex)'}},
   btc_binance:   {{line:'#f7931a',fill:'rgba(247,147,26,0.08)',label:'BTC (Binance)'}},
+  spyx_mexc:     {{line:'#a855f7',fill:'rgba(168,85,247,0.08)',label:'SPYx (MEXC)'}},
+}};
+
+// Right-axis asset labels for Y-axis title
+var RIGHT_AXIS_LABELS = {{
+  btc: 'BTC (USD)',
+  spyx: 'SPYx (USD)',
 }};
 
 {decrypt_js}
+
+// ========== HELPER: get selected right-axis asset ==========
+function getSelectedRight() {{
+  var radios = document.getElementsByName('right-axis');
+  for (var i = 0; i < radios.length; i++) {{
+    if (radios[i].checked) return radios[i].value;
+  }}
+  return 'btc';
+}}
 
 // ========== INIT APP ==========
 function initApp() {{
@@ -351,12 +371,13 @@ function initApp() {{
     document.getElementById('date-end').value = tsToDate(maxTs);
   }}
 
-  ['cb-xaut','cb-btc','cb-okx','cb-bitfinex'].forEach(function(id) {{
+  ['cb-xaut','cb-okx','cb-bitfinex'].forEach(function(id) {{
     document.getElementById(id).addEventListener('change', render);
   }});
   document.getElementById('date-start').addEventListener('change', render);
   document.getElementById('date-end').addEventListener('change', render);
 
+  // Disable radio buttons for assets without data
   var selGran = document.getElementById('sel-gran');
   var opts = selGran.options;
   for (var i = 0; i < opts.length; i++) {{
@@ -369,6 +390,18 @@ function initApp() {{
     }}
     if (!hasData) {{ opts[i].disabled = true; opts[i].text += ' (no data)'; }}
   }}
+
+  // Check if SPYx data exists for any granularity
+  var hasSpyx = false;
+  for (var k in DATA) {{
+    if (k.indexOf('spyx_') === 0 && DATA[k] && DATA[k].length > 0) {{ hasSpyx = true; break; }}
+  }}
+  if (!hasSpyx) {{
+    document.getElementById('rb-spyx').disabled = true;
+    var lbl = document.getElementById('rb-spyx').nextElementSibling;
+    if (lbl) lbl.className = 'cb-label disabled';
+  }}
+
   render();
 }}
 
@@ -403,14 +436,15 @@ function render() {{
   var startTs = dateToTs(document.getElementById('date-start').value);
   var endTs = dateToTs(document.getElementById('date-end').value) + 86400;
   var showXaut = document.getElementById('cb-xaut').checked;
-  var showBtc = document.getElementById('cb-btc').checked;
   var showOkx = document.getElementById('cb-okx').checked;
   var showBfx = document.getElementById('cb-bitfinex').checked;
+  var rightAsset = getSelectedRight();
 
   var datasets = [];
   var hasLeftAxis = false;
   var hasRightAxis = false;
 
+  // Left axis: XAUt
   if (showXaut && showOkx) {{
     var d = getFiltered('xaut_okx_' + gran, startTs, endTs);
     if (d.length > 0) {{ datasets.push(makeDataset('xaut_okx', d, 'y', false)); hasLeftAxis = true; }}
@@ -419,11 +453,20 @@ function render() {{
     var d = getFiltered('xaut_bitfinex_' + gran, startTs, endTs);
     if (d.length > 0) {{ datasets.push(makeDataset('xaut_bitfinex', d, 'y', showOkx)); hasLeftAxis = true; }}
   }}
-  if (showBtc) {{
+
+  // Right axis: BTC or SPYx (exclusive)
+  if (rightAsset === 'btc') {{
     var d = getFiltered('btc_binance_' + gran, startTs, endTs);
     if (d.length > 0) {{
       var axisId = hasLeftAxis ? 'y1' : 'y';
       datasets.push(makeDataset('btc_binance', d, axisId, false));
+      if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
+    }}
+  }} else if (rightAsset === 'spyx') {{
+    var d = getFiltered('spyx_mexc_' + gran, startTs, endTs);
+    if (d.length > 0) {{
+      var axisId = hasLeftAxis ? 'y1' : 'y';
+      datasets.push(makeDataset('spyx_mexc', d, axisId, false));
       if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
     }}
   }}
@@ -433,14 +476,17 @@ function render() {{
   var totalDays = (endTs - startTs) / 86400;
   var timeUnit = totalDays > 90 ? 'week' : (totalDays > 7 ? 'day' : 'hour');
 
+  var leftLabel = 'XAUt (USD)';
+  var rightLabel = RIGHT_AXIS_LABELS[rightAsset] || 'USD';
+
   var scales = {{
     x: {{ type:'time', time:{{unit:timeUnit}}, grid:{{color:'rgba(48,54,61,0.6)'}}, ticks:{{color:'#8b949e',maxTicksLimit:12}} }}
   }};
   if (hasLeftAxis || !hasRightAxis) {{
-    scales.y = {{ position:'left', title:{{display:true,text:showXaut?'XAUt (USD)':'BTC (USD)',color:'#8b949e'}}, grid:{{color:'rgba(48,54,61,0.6)'}}, ticks:{{color:'#8b949e',callback:function(v){{return '$'+v.toLocaleString();}}}} }};
+    scales.y = {{ position:'left', title:{{display:true,text:showXaut ? leftLabel : rightLabel,color:'#8b949e'}}, grid:{{color:'rgba(48,54,61,0.6)'}}, ticks:{{color:'#8b949e',callback:function(v){{return '$'+v.toLocaleString();}}}} }};
   }}
   if (hasRightAxis) {{
-    scales.y1 = {{ position:'right', title:{{display:true,text:'BTC (USD)',color:'#8b949e'}}, grid:{{drawOnChartArea:false}}, ticks:{{color:'#8b949e',callback:function(v){{return '$'+v.toLocaleString();}}}} }};
+    scales.y1 = {{ position:'right', title:{{display:true,text:rightLabel,color:'#8b949e'}}, grid:{{drawOnChartArea:false}}, ticks:{{color:'#8b949e',callback:function(v){{return '$'+v.toLocaleString();}}}} }};
   }}
 
   chart = new Chart(ctx, {{
@@ -457,12 +503,13 @@ function render() {{
     }}
   }});
 
-  updateStats(gran, startTs, endTs, showXaut, showBtc, showOkx, showBfx);
+  updateStats(gran, startTs, endTs, showXaut, showOkx, showBfx, rightAsset);
   var totalPoints = datasets.reduce(function(s,d){{return s+d.data.length;}},0);
   document.getElementById('data-info').textContent = 'Showing '+totalPoints+' data points | Granularity: '+gran+' | Period: '+document.getElementById('date-start').value+' to '+document.getElementById('date-end').value;
   var parts = [];
   if (showXaut) parts.push('XAUt');
-  if (showBtc) parts.push('BTC');
+  if (rightAsset === 'btc') parts.push('BTC');
+  else if (rightAsset === 'spyx') parts.push('SPYx');
   document.getElementById('chart-title').textContent = parts.join(' & ')+' \\u2014 '+gran+' Chart';
 }}
 
@@ -471,13 +518,14 @@ function makeDataset(key, data, yAxisID, dashed) {{
   return {{ label:c.label, data:data.map(function(d){{return {{x:new Date(d[0]*1000),y:d[4]}}; }}), borderColor:c.line, backgroundColor:c.fill, borderDash:dashed?[6,3]:[], fill:false, yAxisID:yAxisID, pointRadius:0, pointHoverRadius:4, borderWidth:1.5 }};
 }}
 
-function updateStats(gran, startTs, endTs, showXaut, showBtc, showOkx, showBfx) {{
+function updateStats(gran, startTs, endTs, showXaut, showOkx, showBfx, rightAsset) {{
   var container = document.getElementById('stats-container');
   container.innerHTML = '';
   var cards = [];
   if (showXaut && showOkx) cards.push({{key:'xaut_okx_'+gran,name:'XAUt (OKX)',color:'var(--gold)'}});
   if (showXaut && showBfx) cards.push({{key:'xaut_bitfinex_'+gran,name:'XAUt (Bitfinex)',color:'var(--bitfinex)'}});
-  if (showBtc) cards.push({{key:'btc_binance_'+gran,name:'BTC (Binance)',color:'var(--btc)'}});
+  if (rightAsset === 'btc') cards.push({{key:'btc_binance_'+gran,name:'BTC (Binance)',color:'var(--btc)'}});
+  if (rightAsset === 'spyx') cards.push({{key:'spyx_mexc_'+gran,name:'SPYx (MEXC)',color:'var(--spyx)'}});
   cards.forEach(function(c) {{
     var d = getFiltered(c.key, startTs, endTs);
     if (d.length === 0) return;
@@ -507,15 +555,15 @@ function guardedExport(exportFn) {{
   }}
 }}
 
-// ========== CSV EXPORT ==========
+// ========== CSV EXPORT (ALL series) ==========
 function exportCSV() {{
   var gran=document.getElementById('sel-gran').value;
   var startTs=dateToTs(document.getElementById('date-start').value);
   var endTs=dateToTs(document.getElementById('date-end').value)+86400;
+  // Export ALL series for this granularity, regardless of UI selection
   var series=[];
-  if(document.getElementById('cb-xaut').checked&&document.getElementById('cb-okx').checked) series.push('xaut_okx_'+gran);
-  if(document.getElementById('cb-xaut').checked&&document.getElementById('cb-bitfinex').checked) series.push('xaut_bitfinex_'+gran);
-  if(document.getElementById('cb-btc').checked) series.push('btc_binance_'+gran);
+  var allKeys=['xaut_okx_'+gran,'xaut_bitfinex_'+gran,'btc_binance_'+gran,'spyx_mexc_'+gran];
+  allKeys.forEach(function(key){{ if(DATA[key]&&DATA[key].length>0) series.push(key); }});
   var tsMap={{}};
   series.forEach(function(key){{ var d=getFiltered(key,startTs,endTs); d.forEach(function(row){{ if(!tsMap[row[0]])tsMap[row[0]]={{}}; tsMap[row[0]][key]=row; }}); }});
   var timestamps=Object.keys(tsMap).map(Number).sort(function(a,b){{return a-b;}});
@@ -523,20 +571,22 @@ function exportCSV() {{
   series.forEach(function(key){{ var base=key.replace('_'+gran,''); headers.push(base+'_open',base+'_high',base+'_low',base+'_close',base+'_volume'); }});
   var lines=[headers.join(',')];
   timestamps.forEach(function(ts){{ var row=[ts,new Date(ts*1000).toISOString()]; series.forEach(function(key){{ var d=tsMap[ts][key]; if(d){{row.push(d[1],d[2],d[3],d[4],d[5]);}}else{{row.push('','','','','');}} }}); lines.push(row.join(',')); }});
-  downloadFile(lines.join('\\n'),'crypto_data_'+gran+'.csv','text/csv');
+  downloadFile(lines.join('\\n'),'crypto_all_data_'+gran+'.csv','text/csv');
 }}
 
-// ========== XLSX EXPORT ==========
+// ========== XLSX EXPORT (ALL series) ==========
 function exportXLSX() {{
   if(typeof XLSX==='undefined'){{alert('SheetJS library not loaded.');return;}}
   var gran=document.getElementById('sel-gran').value;
   var startTs=dateToTs(document.getElementById('date-start').value);
   var endTs=dateToTs(document.getElementById('date-end').value)+86400;
   var wb=XLSX.utils.book_new();
+  // Export ALL series regardless of UI selection
   var sheetConfigs=[];
-  if(document.getElementById('cb-xaut').checked&&document.getElementById('cb-okx').checked) sheetConfigs.push({{key:'xaut_okx_'+gran,name:'XAUt_OKX'}});
-  if(document.getElementById('cb-xaut').checked&&document.getElementById('cb-bitfinex').checked) sheetConfigs.push({{key:'xaut_bitfinex_'+gran,name:'XAUt_Bitfinex'}});
-  if(document.getElementById('cb-btc').checked) sheetConfigs.push({{key:'btc_binance_'+gran,name:'BTC_Binance'}});
+  if(DATA['xaut_okx_'+gran]&&DATA['xaut_okx_'+gran].length>0) sheetConfigs.push({{key:'xaut_okx_'+gran,name:'XAUt_OKX'}});
+  if(DATA['xaut_bitfinex_'+gran]&&DATA['xaut_bitfinex_'+gran].length>0) sheetConfigs.push({{key:'xaut_bitfinex_'+gran,name:'XAUt_Bitfinex'}});
+  if(DATA['btc_binance_'+gran]&&DATA['btc_binance_'+gran].length>0) sheetConfigs.push({{key:'btc_binance_'+gran,name:'BTC_Binance'}});
+  if(DATA['spyx_mexc_'+gran]&&DATA['spyx_mexc_'+gran].length>0) sheetConfigs.push({{key:'spyx_mexc_'+gran,name:'SPYx_MEXC'}});
   sheetConfigs.forEach(function(cfg){{
     var d=getFiltered(cfg.key,startTs,endTs);
     var rows=[['Timestamp','DateTime','Open','High','Low','Close','Volume']];
@@ -555,7 +605,7 @@ function exportXLSX() {{
   timestamps.forEach(function(ts){{var row=[ts,new Date(ts*1000).toISOString()];series.forEach(function(key){{var d=tsMap[ts][key];if(d){{row.push(d[1],d[2],d[3],d[4],d[5]);}}else{{row.push('','','','','');}}}});mR.push(row);}});
   var mWs=XLSX.utils.aoa_to_sheet(mR);
   XLSX.utils.book_append_sheet(wb,mWs,'Merged');
-  XLSX.writeFile(wb,'crypto_data_'+gran+'.xlsx');
+  XLSX.writeFile(wb,'crypto_all_data_'+gran+'.xlsx');
 }}
 
 function downloadFile(content,filename,mime) {{
