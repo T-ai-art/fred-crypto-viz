@@ -148,10 +148,10 @@ _HTML_BODY = """
     <div class="ctrl-group">
       <label>Granularity:</label>
       <select id="sel-gran" onchange="render()">
-        <option value="1m">1 min</option>
+        <option value="1m" selected>1 min</option>
         <option value="5m">5 min</option>
         <option value="15m">15 min</option>
-        <option value="1H" selected>1 hour</option>
+        <option value="1H">1 hour</option>
         <option value="4H">4 hours</option>
         <option value="1D">1 day</option>
       </select>
