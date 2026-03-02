@@ -51,8 +51,8 @@ def parse_args():
 
     p.add_argument('--auto', action='store_true',
                    help='Auto mode: fetch all granularities with default periods')
-    p.add_argument('--assets', default='xaut,btc,hormuz,ceasefire,regime',
-                   help='Comma-separated assets: xaut,btc,hormuz,ceasefire,regime (default: all)')
+    p.add_argument('--assets', default='xaut,btc,iran,hormuz,ceasefire,regime',
+                   help='Comma-separated assets: xaut,btc,iran,hormuz,ceasefire,regime (default: all)')
     p.add_argument('--xaut-sources', default='okx,bitfinex',
                    help='Comma-separated XAUt sources: okx,bitfinex (default: both)')
     p.add_argument('--days', type=int, default=None,
@@ -151,6 +151,19 @@ def main():
             except Exception as e:
                 print(f'  [ERROR] Binance fetch failed: {e}')
                 all_data[f'btc_binance_{gran}'] = []
+
+        # US Strikes Iran Probability (Polymarket — resolved)
+        if 'iran' in assets:
+            print(f'  Fetching Iran Strike prob from Polymarket...')
+            try:
+                data = polymarket.fetch(start_ts, end_ts, gran,
+                                        market_key='iran_legacy',
+                                        verbose=args.verbose)
+                all_data[f'iran_polymarket_{gran}'] = data
+                total_candles += len(data)
+            except Exception as e:
+                print(f'  [ERROR] Polymarket Iran fetch failed: {e}')
+                all_data[f'iran_polymarket_{gran}'] = []
 
         # Hormuz Strait Closure Probability (Polymarket)
         if 'hormuz' in assets:

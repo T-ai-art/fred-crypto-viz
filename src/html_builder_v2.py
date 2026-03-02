@@ -70,7 +70,7 @@ _CSS = """
   --bg: #0d1117; --surface: #161b22; --border: #30363d;
   --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
   --gold-bfx: #CCB58A; --gold-okx: #DB7600;
-  --btc: #834C82; --hormuz: #ef4444; --ceasefire: #3b82f6; --regime: #f59e0b;
+  --btc: #834C82; --iran: #f97316; --hormuz: #ef4444; --ceasefire: #3b82f6; --regime: #f59e0b;
   --green: #3fb950; --red: #f85149;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -139,6 +139,7 @@ _HTML_BODY = """
     <div class="ctrl-group">
       <label>Right Axis:</label>
       <input type="radio" name="right-axis" id="rb-btc" value="btc" checked onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-btc').click()"> BTC</span>
+      <input type="radio" name="right-axis" id="rb-iran" value="iran" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-iran').click()"> Iran %</span>
       <input type="radio" name="right-axis" id="rb-hormuz" value="hormuz" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-hormuz').click()"> Hormuz %</span>
       <input type="radio" name="right-axis" id="rb-ceasefire" value="ceasefire" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-ceasefire').click()"> Ceasefire %</span>
       <input type="radio" name="right-axis" id="rb-regime" value="regime" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-regime').click()"> Regime %</span>
@@ -164,6 +165,15 @@ _HTML_BODY = """
         <option value="1H">1 hour</option>
         <option value="4H">4 hours</option>
         <option value="1D">1 day</option>
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group">
+      <label>TZ:</label>
+      <select id="sel-tz" onchange="render()">
+        <option value="Asia/Tokyo" selected>Tokyo</option>
+        <option value="America/New_York">NY</option>
+        <option value="UTC">UTC</option>
       </select>
     </div>
     <div class="sep"></div>
@@ -239,6 +249,7 @@ var COLORS = {
   xaut_okx:             {line:'#DB7600',fill:'rgba(219,118,0,0.10)',label:'XAUt (OKX)'},
   xaut_bitfinex:        {line:'#CCB58A',fill:'rgba(204,181,138,0.15)',label:'XAUt (Bitfinex)'},
   btc_binance:          {line:'#834C82',fill:'rgba(131,76,130,0.12)',label:'BTC (Binance)'},
+  iran_polymarket:      {line:'#f97316',fill:'rgba(249,115,22,0.12)',label:'Iran Strike % (Polymarket)'},
   hormuz_polymarket:    {line:'#ef4444',fill:'rgba(239,68,68,0.12)',label:'Hormuz Closure % (Polymarket)'},
   ceasefire_polymarket: {line:'#3b82f6',fill:'rgba(59,130,246,0.12)',label:'Ceasefire % (Polymarket)'},
   regime_polymarket:    {line:'#f59e0b',fill:'rgba(245,158,11,0.12)',label:'Regime Fall % (Polymarket)'}
@@ -246,11 +257,12 @@ var COLORS = {
 
 var RIGHT_AXIS_LABELS = {
   btc: 'BTC (USD)',
+  iran: 'Iran Strike Probability (%)',
   hormuz: 'Hormuz Closure Probability (%)',
   ceasefire: 'Ceasefire Probability (%)',
   regime: 'Regime Fall Probability (%)'
 };
-var PERCENT_ASSETS = ['hormuz','ceasefire','regime'];
+var PERCENT_ASSETS = ['iran','hormuz','ceasefire','regime'];
 
 // Timeframe mappings per exchange
 var TF = {
@@ -261,6 +273,7 @@ var TF = {
 };
 
 var POLY_TOKENS = {
+  iran:      '110790003121442365126855864076707686014650523258783405996925622264696084778807',
   hormuz:    '11259214629259962188961658360673801608680858594287954976598964541495296876564',
   ceasefire: '5708561660601459805512817131601230493971589760294984590237789749933853841330',
   regime:    '38397507750621893057346880033441136112987238933685677349709401910643842844855'
@@ -268,10 +281,46 @@ var POLY_TOKENS = {
 
 // ========== UTILITY ==========
 function sleep(ms) { return new Promise(function(r){setTimeout(r,ms);}); }
-function tsToDate(ts) { var d=new Date(ts*1000); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
-function dateToTs(str) { if(!str)return 0; var p=str.split('-'); return Math.floor(new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).getTime()/1000); }
 function pad2(n) { return n<10?'0'+n:''+n; }
 function nowSec() { return Math.floor(Date.now()/1000); }
+
+function getSelectedTZ() {
+  var sel = document.getElementById('sel-tz');
+  return sel ? sel.value : 'Asia/Tokyo';
+}
+
+function tsToDate(ts) {
+  var tz = getSelectedTZ();
+  if (tz === 'UTC') {
+    var d = new Date(ts * 1000);
+    return d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate());
+  }
+  // Use Intl for timezone-aware date
+  var parts = new Intl.DateTimeFormat('en-CA', {timeZone:tz, year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date(ts*1000));
+  return parts; // en-CA gives YYYY-MM-DD format
+}
+
+function dateToTs(str) {
+  if(!str) return 0;
+  var p = str.split('-');
+  // Always parse as UTC midnight — the timezone offset is handled in display only
+  return Math.floor(new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).getTime()/1000);
+}
+
+function formatTZTime(ts) {
+  var tz = getSelectedTZ();
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone:tz, year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hour12:false
+  }).format(new Date(ts*1000));
+}
+
+function getTZLabel() {
+  var tz = getSelectedTZ();
+  if (tz === 'Asia/Tokyo') return 'JST';
+  if (tz === 'America/New_York') return 'ET';
+  return 'UTC';
+}
 
 function getSelectedRight() {
   var radios = document.getElementsByName('right-axis');
@@ -416,18 +465,13 @@ async function refreshData() {
     keys.push('btc_binance_'+gran);
 
     // Polymarket: active markets — live fetch for selected right axis
-    if (rightAsset === 'hormuz' && POLY_TOKENS.hormuz && POLY_TOKENS.hormuz.indexOf('PLACEHOLDER') < 0) {
-      promises.push(apiFetchPolymarket(startSec, now, gran, POLY_TOKENS.hormuz));
-      keys.push('hormuz_polymarket_'+gran);
-    }
-    if (rightAsset === 'ceasefire' && POLY_TOKENS.ceasefire && POLY_TOKENS.ceasefire.indexOf('PLACEHOLDER') < 0) {
-      promises.push(apiFetchPolymarket(startSec, now, gran, POLY_TOKENS.ceasefire));
-      keys.push('ceasefire_polymarket_'+gran);
-    }
-    if (rightAsset === 'regime' && POLY_TOKENS.regime && POLY_TOKENS.regime.indexOf('PLACEHOLDER') < 0) {
-      promises.push(apiFetchPolymarket(startSec, now, gran, POLY_TOKENS.regime));
-      keys.push('regime_polymarket_'+gran);
-    }
+    var polyRefreshList = ['iran','hormuz','ceasefire','regime'];
+    polyRefreshList.forEach(function(mk) {
+      if (rightAsset === mk && POLY_TOKENS[mk] && POLY_TOKENS[mk].indexOf('PLACEHOLDER') < 0) {
+        promises.push(apiFetchPolymarket(startSec, now, gran, POLY_TOKENS[mk]));
+        keys.push(mk+'_polymarket_'+gran);
+      }
+    });
 
     var results = await Promise.allSettled(promises);
     results.forEach(function(r, i) {
@@ -492,8 +536,8 @@ async function fetchAllForExport() {
     promises.push(apiFetchBinance(startSec, endSec, gran).catch(function(){return [];}));
     pKeys.push('btc_binance_'+gran);
 
-    // Polymarket: active markets — live fetch for export
-    var polyMarkets = ['hormuz','ceasefire','regime'];
+    // Polymarket: all markets — live fetch for export
+    var polyMarkets = ['iran','hormuz','ceasefire','regime'];
     polyMarkets.forEach(function(mk) {
       if (POLY_TOKENS[mk] && POLY_TOKENS[mk].indexOf('PLACEHOLDER') < 0) {
         promises.push(apiFetchPolymarket(startSec, endSec, gran, POLY_TOKENS[mk]).catch(function(){return [];}));
@@ -548,7 +592,7 @@ function initApp() {
   }
 
   // Disable radio buttons for missing Polymarket assets
-  ['hormuz','ceasefire','regime'].forEach(function(mk) {
+  ['iran','hormuz','ceasefire','regime'].forEach(function(mk) {
     var hasData = false;
     for (var k in DATA) { if (k.indexOf(mk+'_') === 0 && DATA[k] && DATA[k].length > 0) { hasData = true; break; } }
     // Also enable if token is available for live fetch
@@ -619,7 +663,7 @@ function render() {
       datasets.push(makeDataset('btc_binance', d, axisId, false));
       if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
     }
-  } else if (rightAsset === 'hormuz' || rightAsset === 'ceasefire' || rightAsset === 'regime') {
+  } else if (rightAsset === 'iran' || rightAsset === 'hormuz' || rightAsset === 'ceasefire' || rightAsset === 'regime') {
     var polyKey = rightAsset + '_polymarket_' + gran;
     var d = getFiltered(polyKey, startTs, endTs);
     if (d.length > 0) {
@@ -637,8 +681,14 @@ function render() {
   var leftLabel = 'XAUt (USD)';
   var rightLabel = RIGHT_AXIS_LABELS[rightAsset] || 'USD';
 
+  var tz = getSelectedTZ();
+  var tzLabel = getTZLabel();
   var scales = {
-    x: { type:'time', time:{unit:timeUnit}, grid:{color:'rgba(48,54,61,0.6)'}, ticks:{color:'#8b949e',maxTicksLimit:12} }
+    x: { type:'time', time:{unit:timeUnit, tooltipFormat:'yyyy-MM-dd HH:mm'}, grid:{color:'rgba(48,54,61,0.6)'},
+         ticks:{color:'#8b949e',maxTicksLimit:12,callback:function(val){
+           return new Intl.DateTimeFormat('en-GB',{timeZone:tz,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(val));
+         }},
+         title:{display:true,text:tzLabel,color:'#8b949e',font:{size:11}} }
   };
   if (hasLeftAxis || !hasRightAxis) {
     scales.y = { position:'left', title:{display:true,text:showXaut?leftLabel:rightLabel,color:'#8b949e'}, grid:{color:'rgba(48,54,61,0.6)'}, ticks:{color:'#8b949e',callback:function(v){return '$'+v.toLocaleString();}} };
@@ -657,7 +707,9 @@ function render() {
       responsive:true, maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
       plugins: {
-        tooltip:{callbacks:{label:function(ctx){
+        tooltip:{callbacks:{
+          title:function(items){if(!items.length)return '';return new Intl.DateTimeFormat('en-GB',{timeZone:tz,year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(items[0].parsed.x))+' '+tzLabel;},
+          label:function(ctx){
           if(ctx.dataset.label&&ctx.dataset.label.indexOf('%')>=0){return ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+'%';}
           return ctx.dataset.label+': $'+ctx.parsed.y.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
         }}},
@@ -676,6 +728,7 @@ function render() {
   var parts = [];
   if (showXaut) parts.push('XAUt');
   if (rightAsset === 'btc') parts.push('BTC');
+  else if (rightAsset === 'iran') parts.push('Iran Strike %');
   else if (rightAsset === 'hormuz') parts.push('Hormuz Closure %');
   else if (rightAsset === 'ceasefire') parts.push('Ceasefire %');
   else if (rightAsset === 'regime') parts.push('Regime Fall %');
@@ -694,6 +747,7 @@ function updateStats(gran, startTs, endTs, showXaut, showOkx, showBfx, rightAsse
   if (showXaut && showOkx) cards.push({key:'xaut_okx_'+gran,name:'XAUt (OKX)',color:'var(--gold-okx)'});
   if (showXaut && showBfx) cards.push({key:'xaut_bitfinex_'+gran,name:'XAUt (Bitfinex)',color:'var(--gold-bfx)'});
   if (rightAsset === 'btc') cards.push({key:'btc_binance_'+gran,name:'BTC (Binance)',color:'var(--btc)'});
+  if (rightAsset === 'iran') cards.push({key:'iran_polymarket_'+gran,name:'Iran Strike % (Polymarket)',color:'var(--iran)',isPercent:true});
   if (rightAsset === 'hormuz') cards.push({key:'hormuz_polymarket_'+gran,name:'Hormuz Closure % (Polymarket)',color:'var(--hormuz)',isPercent:true});
   if (rightAsset === 'ceasefire') cards.push({key:'ceasefire_polymarket_'+gran,name:'Ceasefire % (Polymarket)',color:'var(--ceasefire)',isPercent:true});
   if (rightAsset === 'regime') cards.push({key:'regime_polymarket_'+gran,name:'Regime Fall % (Polymarket)',color:'var(--regime)',isPercent:true});
@@ -751,7 +805,7 @@ function exportCSV(dlData) {
 
   grans.forEach(function(gran) {
     var series = [];
-    var allKeys = ['xaut_okx_'+gran,'xaut_bitfinex_'+gran,'btc_binance_'+gran,'hormuz_polymarket_'+gran,'ceasefire_polymarket_'+gran,'regime_polymarket_'+gran];
+    var allKeys = ['xaut_okx_'+gran,'xaut_bitfinex_'+gran,'btc_binance_'+gran,'iran_polymarket_'+gran,'hormuz_polymarket_'+gran,'ceasefire_polymarket_'+gran,'regime_polymarket_'+gran];
     allKeys.forEach(function(key){ if(dlData[key] && dlData[key].length > 0) series.push(key); });
     if (series.length === 0) return;
 
@@ -785,6 +839,7 @@ function exportXLSX(dlData) {
     if(dlData['xaut_okx_'+gran] && dlData['xaut_okx_'+gran].length>0) sheetConfigs.push({key:'xaut_okx_'+gran,name:'XAUt_OKX_'+gran});
     if(dlData['xaut_bitfinex_'+gran] && dlData['xaut_bitfinex_'+gran].length>0) sheetConfigs.push({key:'xaut_bitfinex_'+gran,name:'XAUt_BFX_'+gran});
     if(dlData['btc_binance_'+gran] && dlData['btc_binance_'+gran].length>0) sheetConfigs.push({key:'btc_binance_'+gran,name:'BTC_'+gran});
+    if(dlData['iran_polymarket_'+gran] && dlData['iran_polymarket_'+gran].length>0) sheetConfigs.push({key:'iran_polymarket_'+gran,name:'Iran_'+gran});
     if(dlData['hormuz_polymarket_'+gran] && dlData['hormuz_polymarket_'+gran].length>0) sheetConfigs.push({key:'hormuz_polymarket_'+gran,name:'Hormuz_'+gran});
     if(dlData['ceasefire_polymarket_'+gran] && dlData['ceasefire_polymarket_'+gran].length>0) sheetConfigs.push({key:'ceasefire_polymarket_'+gran,name:'Ceasefire_'+gran});
     if(dlData['regime_polymarket_'+gran] && dlData['regime_polymarket_'+gran].length>0) sheetConfigs.push({key:'regime_polymarket_'+gran,name:'Regime_'+gran});
