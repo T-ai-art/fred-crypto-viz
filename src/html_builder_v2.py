@@ -460,8 +460,14 @@ async function fetchAllForExport() {
   var grans = ['1m','5m','15m','1H','4H','1D'];
   var dlData = {};
   var startSec = dateToTs(document.getElementById('date-start').value);
-  var endSec = nowSec();
+  var endSec = dateToTs(document.getElementById('date-end').value) + 86400;
   var showOkx = document.getElementById('cb-okx').checked;
+
+  // Helper: filter array to [startSec, endSec] range
+  function filterRange(arr) {
+    if (!arr || arr.length === 0) return [];
+    return arr.filter(function(row) { return row[0] >= startSec && row[0] <= endSec; });
+  }
 
   for (var gi = 0; gi < grans.length; gi++) {
     var gran = grans[gi];
@@ -492,18 +498,23 @@ async function fetchAllForExport() {
         promises.push(apiFetchPolymarket(startSec, endSec, gran, POLY_TOKENS[mk]).catch(function(){return [];}));
         pKeys.push(mk+'_polymarket_'+gran);
       } else {
-        // fallback to embedded data
+        // fallback to embedded data — filter to requested range
         var embKey = mk+'_polymarket_'+gran;
-        if (DATA[embKey] && DATA[embKey].length > 0) dlData[embKey] = DATA[embKey];
+        var filtered = filterRange(DATA[embKey]);
+        if (filtered.length > 0) dlData[embKey] = filtered;
       }
     });
 
     var results = await Promise.all(promises);
     results.forEach(function(data, i) {
-      if (data && data.length > 0) {
-        dlData[pKeys[i]] = data;
-      } else if (DATA[pKeys[i]] && DATA[pKeys[i]].length > 0) {
-        dlData[pKeys[i]] = DATA[pKeys[i]]; // fallback to embedded
+      // Apply range filter to fetched data
+      var filtered = filterRange(data);
+      if (filtered.length > 0) {
+        dlData[pKeys[i]] = filtered;
+      } else {
+        // fallback to embedded data — also filtered
+        var embFiltered = filterRange(DATA[pKeys[i]]);
+        if (embFiltered.length > 0) dlData[pKeys[i]] = embFiltered;
       }
     });
   }
