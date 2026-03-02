@@ -22,6 +22,7 @@ v2.1 changes:
 import json
 import datetime
 import os
+import pathlib
 import hashlib
 import base64
 
@@ -852,6 +853,58 @@ async function unlockDownload() {
 
 
 # =========================================================================
+# VENDOR SCRIPTS (Chart.js, adapter, SheetJS)
+# =========================================================================
+_VENDOR_URLS = [
+    ('chart.js@4.4.1', 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'),
+    ('chartjs-adapter-date-fns@3.0.0', 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js'),
+    ('xlsx@0.18.5', 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'),
+]
+
+_VENDOR_CACHE_DIR = pathlib.Path(__file__).resolve().parent / 'vendor'
+
+
+def _load_vendor_scripts(cdn_mode=True):
+    """Load vendor JS libraries. Always inline for self-contained HTML.
+
+    Downloads once, caches to src/vendor/.
+    Falls back to CDN <script src> tags only if download fails AND cdn_mode=True.
+    """
+    _VENDOR_CACHE_DIR.mkdir(exist_ok=True)
+    parts = []
+
+    for name, url in _VENDOR_URLS:
+        cache_file = _VENDOR_CACHE_DIR / (name.replace('/', '_') + '.min.js')
+
+        # Try cached file first
+        js_text = None
+        if cache_file.exists() and cache_file.stat().st_size > 0:
+            js_text = cache_file.read_text(encoding='utf-8')
+
+        # Download if not cached
+        if js_text is None:
+            try:
+                import urllib.request, ssl
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                resp = urllib.request.urlopen(url, context=ctx, timeout=30)
+                js_bytes = resp.read()
+                js_text = js_bytes.decode('utf-8')
+                cache_file.write_text(js_text, encoding='utf-8')
+                print(f'  [vendor] Downloaded {name} ({len(js_bytes)} bytes)')
+            except Exception as exc:
+                print(f'  [vendor] WARNING: Failed to download {name}: {exc}')
+                if cdn_mode:
+                    parts.append(f'    <script src="{url}"></script>')
+                continue
+
+        parts.append(f'<script>/* {name} */{js_text}</script>')
+
+    return '\n'.join(parts)
+
+
+# =========================================================================
 # BUILD HTML
 # =========================================================================
 def build_html(all_data, meta, cdn=True, password=None):
@@ -872,14 +925,8 @@ def build_html(all_data, meta, cdn=True, password=None):
     gen_at = meta.get('generated_at',
                       datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC'))
 
-    # CDN script tags
-    cdn_tags = ''
-    if cdn:
-        cdn_tags = (
-            '    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>\n'
-            '    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>\n'
-            '    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>'
-        )
+    # Vendor scripts — always inline for reliability (avoids CDN SSL issues)
+    vendor_scripts = _load_vendor_scripts(cdn)
 
     # JS data section
     js_data = 'var DATA = ' + data_json + ';\nvar META = ' + meta_json + ';\n'
@@ -899,7 +946,7 @@ def build_html(all_data, meta, cdn=True, password=None):
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
         '<meta name="theme-color" content="#0d1117">\n'
         '<title>Crypto Asset Data Explorer v2 | Tokenized Assets</title>\n'
-        + cdn_tags + '\n<style>\n' + _CSS + '\n</style>\n</head>\n<body>\n'
+        + vendor_scripts + '\n<style>\n' + _CSS + '\n</style>\n</head>\n<body>\n'
         '<div class="container">\n'
         + _HTML_BODY.replace('__GENERATED_AT__', gen_at)
         + '\n</div>\n<script>\n'
