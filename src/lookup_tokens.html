@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head><title>Polymarket Token ID Lookup</title>
+<style>
+body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+pre { background: #16213e; padding: 16px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
+h1 { color: #58a6ff; }
+button { background: #58a6ff; color: #000; border: none; padding: 12px 24px; font-size: 16px; border-radius: 6px; cursor: pointer; margin: 10px 0; }
+button:hover { background: #388bfd; }
+</style>
+</head>
+<body>
+<h1>Polymarket Token ID Lookup</h1>
+<p>Click the button to search for token IDs by paginating the CLOB API markets endpoint.</p>
+<button onclick="lookupAll()">Search Markets</button>
+<pre id="output">Ready. Click the button above.
+
+This will scan the CLOB API /markets endpoint to find the 3 Iran-related markets.
+It may take 30-60 seconds to paginate through all markets.</pre>
+
+<script>
+const TARGET_KEYWORDS = {
+  hormuz:    { match: 'hormuz', dateMatch: 'march 31', found: null },
+  ceasefire: { match: 'ceasefire', dateMatch: 'march', found: null },
+  regime:    { match: 'regime fall', dateMatch: 'june 30', found: null },
+};
+
+const out = document.getElementById('output');
+
+async function lookupAll() {
+  out.textContent = 'Starting CLOB API market scan...\n\n';
+
+  let nextCursor = '';
+  let scanned = 0;
+  let foundCount = 0;
+
+  for (let page = 0; page < 500; page++) {
+    if (foundCount >= 3) break;
+
+    try {
+      let url = 'https://clob.polymarket.com/markets?limit=100';
+      if (nextCursor) url += '&next_cursor=' + encodeURIComponent(nextCursor);
+
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        out.textContent += 'HTTP Error: ' + resp.status + '\n';
+        break;
+      }
+      const body = await resp.json();
+      const markets = body.data || body || [];
+      nextCursor = body.next_cursor || '';
+
+      if (!Array.isArray(markets) || markets.length === 0) {
+        out.textContent += 'No more markets. Scanned: ' + scanned + '\n';
+        break;
+      }
+
+      for (const m of markets) {
+        scanned++;
+        const q = (m.question || '').toLowerCase();
+        const desc = (m.description || '').toLowerCase();
+        const combined = q + ' ' + desc;
+
+        for (const [key, target] of Object.entries(TARGET_KEYWORDS)) {
+          if (target.found) continue;
+          if (combined.includes(target.match)) {
+            // Check date match if specified
+            if (target.dateMatch && !combined.includes(target.dateMatch)) continue;
+
+            target.found = m;
+            foundCount++;
+
+            let tokens = m.tokens || [];
+            let clobIds = m.clobTokenIds;
+            if (typeof clobIds === 'string') clobIds = JSON.parse(clobIds);
+
+            out.textContent += '*** FOUND: ' + key.toUpperCase() + ' ***\n';
+            out.textContent += '  Question: ' + (m.question || 'N/A') + '\n';
+            out.textContent += '  condition_id: ' + (m.condition_id || 'N/A') + '\n';
+            out.textContent += '  active: ' + m.active + '\n';
+
+            if (tokens && tokens.length > 0) {
+              tokens.forEach(function(t, i) {
+                out.textContent += '  Token[' + (t.outcome || i) + ']: ' + t.token_id + '\n';
+              });
+            }
+            if (clobIds) {
+              out.textContent += '  clobTokenIds: ' + JSON.stringify(clobIds) + '\n';
+            }
+            out.textContent += '\n';
+          }
+        }
+      }
+
+      // Progress update every 5 pages
+      if (page % 5 === 0) {
+        out.textContent = out.textContent.replace(/Scanning page.*\n/, '');
+        out.textContent += 'Scanning page ' + (page+1) + '... (' + scanned + ' markets checked, ' + foundCount + '/3 found)\n';
+      }
+
+      if (!nextCursor) {
+        out.textContent += 'Reached end of market list. Scanned: ' + scanned + '\n';
+        break;
+      }
+
+      // Small delay to not overwhelm API
+      await new Promise(r => setTimeout(r, 100));
+
+    } catch(e) {
+      out.textContent += 'ERROR on page ' + page + ': ' + e.message + '\n';
+      out.textContent += 'Trying alternative: Gamma API...\n\n';
+
+      // Fallback: try Gamma API
+      await tryGammaAPI();
+      break;
+    }
+  }
+
+  // Summary
+  out.textContent += '\n' + '='.repeat(70) + '\n';
+  out.textContent += 'SUMMARY - Yes Token IDs (copy these):\n';
+  out.textContent += '='.repeat(70) + '\n\n';
+
+  for (const [key, target] of Object.entries(TARGET_KEYWORDS)) {
+    if (target.found) {
+      const tokens = target.found.tokens || [];
+      const yesToken = tokens.find(t => t.outcome === 'Yes');
+      if (yesToken) {
+        out.textContent += '  ' + key + ': ' + yesToken.token_id + '\n';
+      } else {
+        let clobIds = target.found.clobTokenIds;
+        if (typeof clobIds === 'string') clobIds = JSON.parse(clobIds);
+        out.textContent += '  ' + key + ': ' + (clobIds ? clobIds[0] : 'Check tokens above') + '\n';
+      }
+    } else {
+      out.textContent += '  ' + key + ': NOT FOUND\n';
+    }
+  }
+}
+
+async function tryGammaAPI() {
+  const slugs = [
+    { key: 'hormuz', slug: 'will-iran-close-the-strait-of-hormuz-by-2027' },
+    { key: 'ceasefire', slug: 'us-x-iran-ceasefire-by' },
+    { key: 'regime', slug: 'will-the-iranian-regime-fall-by-june-30' },
+  ];
+
+  for (const s of slugs) {
+    try {
+      const resp = await fetch('https://gamma-api.polymarket.com/events?slug=' + s.slug);
+      const events = await resp.json();
+      out.textContent += 'Gamma API success for ' + s.key + '\n';
+      // process...
+    } catch(e) {
+      out.textContent += 'Gamma API also failed for ' + s.key + ': ' + e.message + '\n';
+    }
+  }
+}
+</script>
+</body>
+</html>

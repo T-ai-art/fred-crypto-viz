@@ -1,14 +1,16 @@
 """
-Polymarket Fetcher — US strikes Iran by Feb 28, 2026 (implied probability)
+Polymarket Fetcher — Multiple Iran-related prediction markets (implied probability)
+
+Supports 3 active markets:
+  1. Hormuz: Will Iran close the Strait of Hormuz by March 31?
+  2. Ceasefire: US x Iran ceasefire by End of March?
+  3. Regime: Will the Iranian regime fall by June 30?
 
 API: https://clob.polymarket.com/prices-history
   - market: token_id (Yes outcome)
   - startTs: unix timestamp (seconds)
   - endTs: unix timestamp (seconds)
   - fidelity: accuracy in minutes (1, 5, 15, 60, 240, 1440)
-
-Response format:
-  {"history": [{"t": unix_ts, "p": price_0_to_1}, ...]}
 
 Returns: List of [timestamp_sec, prob_pct, prob_pct, prob_pct, prob_pct, 0]
   where prob_pct = probability * 100 (0-100 range)
@@ -20,21 +22,50 @@ import ssl
 import time
 import urllib.request
 
-# "US strikes Iran by February 28, 2026?" — Yes token
+# ========== TOKEN IDs (Yes outcomes) ==========
+# To obtain these, run: python3 lookup_tokens.py on your Mac
+# and copy the Yes token IDs here.
+
+# "Will Iran close the Strait of Hormuz by March 31, 2026?" — Yes token
+TOKEN_HORMUZ = "11259214629259962188961658360673801608680858594287954976598964541495296876564"
+
+# "US x Iran ceasefire by End of March?" — Yes token
+TOKEN_CEASEFIRE = "5708561660601459805512817131601230493971589760294984590237789749933853841330"
+
+# "Will the Iranian regime fall by June 30, 2026?" — Yes token
+TOKEN_REGIME = "38397507750621893057346880033441136112987238933685677349709401910643842844855"
+
+# Legacy: "US strikes Iran by February 28, 2026?" — Yes token (resolved)
 TOKEN_IRAN_FEB28_YES = (
     "110790003121442365126855864076707686014650523258783405996925622264696084778807"
 )
 
-# Market metadata
-MARKET_INFO = {
-    'id': '1198423',
-    'question': 'US strikes Iran by February 28, 2026?',
-    'slug': 'us-strikes-iran-by-february-28-2026',
-    'volume': 89652867.36,
-    'conditionId': '0x3488f31e6449f9803f99a8b5dd232c7ad883637f1c86e6953305a2ef19c77f20',
-    'resolved': True,
-    'outcome': 'Yes',
-    'event_date': '2026-02-28T06:15:00Z',  # Operation Epic Fury start (UTC)
+# ========== MARKET REGISTRY ==========
+MARKETS = {
+    'hormuz': {
+        'token_id': TOKEN_HORMUZ,
+        'question': 'Will Iran close the Strait of Hormuz by March 31, 2026?',
+        'label': 'Hormuz Closure %',
+        'active': True,
+    },
+    'ceasefire': {
+        'token_id': TOKEN_CEASEFIRE,
+        'question': 'US x Iran ceasefire by End of March?',
+        'label': 'Ceasefire %',
+        'active': True,
+    },
+    'regime': {
+        'token_id': TOKEN_REGIME,
+        'question': 'Will the Iranian regime fall by June 30, 2026?',
+        'label': 'Regime Fall %',
+        'active': True,
+    },
+    'iran_legacy': {
+        'token_id': TOKEN_IRAN_FEB28_YES,
+        'question': 'US strikes Iran by February 28, 2026?',
+        'label': 'Iran Strike % (resolved)',
+        'active': False,
+    },
 }
 
 FIDELITY_MAP = {
@@ -44,7 +75,7 @@ FIDELITY_MAP = {
 
 
 def fetch(start_ts, end_ts, granularity='1H', token_id=None,
-          rate_limit=0.2, verbose=True):
+          market_key=None, rate_limit=0.2, verbose=True):
     """
     Fetch implied probability history from Polymarket CLOB API.
 
@@ -52,7 +83,8 @@ def fetch(start_ts, end_ts, granularity='1H', token_id=None,
         start_ts: Unix timestamp (seconds), start of range
         end_ts:   Unix timestamp (seconds), end of range
         granularity: '1m','5m','15m','1H','4H','1D'
-        token_id: Polymarket token ID (default: Iran Feb 28 Yes)
+        token_id: Polymarket token ID (overrides market_key)
+        market_key: Key from MARKETS dict ('hormuz','ceasefire','regime')
         rate_limit: delay between requests (seconds)
         verbose: print progress
 
@@ -62,14 +94,22 @@ def fetch(start_ts, end_ts, granularity='1H', token_id=None,
         prob_pct = probability * 100 (0 = 0%, 100 = 100%)
     """
     if token_id is None:
-        token_id = TOKEN_IRAN_FEB28_YES
+        if market_key and market_key in MARKETS:
+            token_id = MARKETS[market_key]['token_id']
+        else:
+            token_id = TOKEN_IRAN_FEB28_YES
+
+    # Determine label for verbose output
+    label = market_key or 'unknown'
+    for k, v in MARKETS.items():
+        if v['token_id'] == token_id:
+            label = k
+            break
 
     fidelity = FIDELITY_MAP.get(granularity, 60)
     ctx = ssl.create_default_context()
     all_points = {}
 
-    # Polymarket API can return a lot of data in one call,
-    # but for long ranges we may need to paginate by chunks
     chunk_size = 86400 * 7  # 7 days per chunk
     current_start = start_ts
 
@@ -97,7 +137,7 @@ def fetch(start_ts, end_ts, granularity='1H', token_id=None,
                 data = json.loads(resp.read().decode())
         except Exception as e:
             if verbose:
-                print(f'  [Polymarket] Chunk {page} error: {e}')
+                print(f'  [Polymarket/{label}] Chunk {page} error: {e}')
             current_start = chunk_end
             page += 1
             continue
@@ -118,7 +158,7 @@ def fetch(start_ts, end_ts, granularity='1H', token_id=None,
                 ]
 
         if verbose and history:
-            print(f'  [Polymarket] Chunk {page}: {len(history)} points '
+            print(f'  [Polymarket/{label}] Chunk {page}: {len(history)} points '
                   f'({_fmt_ts(current_start)} -> {_fmt_ts(chunk_end)})')
 
         current_start = chunk_end
@@ -128,7 +168,7 @@ def fetch(start_ts, end_ts, granularity='1H', token_id=None,
 
     result = sorted(all_points.values(), key=lambda x: x[0])
     if verbose:
-        print(f'  [Polymarket] Iran Feb28 {granularity}: {len(result)} points '
+        print(f'  [Polymarket/{label}] {granularity}: {len(result)} points '
               f'({_fmt_ts(result[0][0]) if result else "N/A"} -> '
               f'{_fmt_ts(result[-1][0]) if result else "N/A"})')
     return result

@@ -5,7 +5,8 @@ live-refresh HTML visualization page.
 
 Changes from v1:
 - Uses html_builder_v2 (live-refresh, updated colors, refresh button)
-- Output defaults to docs_v2/
+- 3 Polymarket markets: Hormuz, Ceasefire, Regime
+- SPYx removed (low liquidity)
 - Same fetch logic as v1; v2 features are in the HTML/JS layer
 
 Usage:
@@ -25,7 +26,7 @@ import time
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fetchers import okx, bitfinex, binance, mexc, polymarket
+from fetchers import okx, bitfinex, binance, polymarket
 import html_builder_v2 as html_builder
 
 
@@ -50,8 +51,8 @@ def parse_args():
 
     p.add_argument('--auto', action='store_true',
                    help='Auto mode: fetch all granularities with default periods')
-    p.add_argument('--assets', default='xaut,btc,spyx,iran',
-                   help='Comma-separated assets: xaut,btc,spyx,iran (default: xaut,btc,spyx,iran)')
+    p.add_argument('--assets', default='xaut,btc,hormuz,ceasefire,regime',
+                   help='Comma-separated assets: xaut,btc,hormuz,ceasefire,regime (default: all)')
     p.add_argument('--xaut-sources', default='okx,bitfinex',
                    help='Comma-separated XAUt sources: okx,bitfinex (default: both)')
     p.add_argument('--days', type=int, default=None,
@@ -151,29 +152,44 @@ def main():
                 print(f'  [ERROR] Binance fetch failed: {e}')
                 all_data[f'btc_binance_{gran}'] = []
 
-        # SPYx (SP500 xStock)
-        if 'spyx' in assets:
-            print(f'  Fetching SPYx from MEXC...')
-            try:
-                data = mexc.fetch(start_ts, end_ts, gran,
-                                  symbol='SPYXUSDT', verbose=args.verbose)
-                all_data[f'spyx_mexc_{gran}'] = data
-                total_candles += len(data)
-            except Exception as e:
-                print(f'  [ERROR] MEXC SPYx fetch failed: {e}')
-                all_data[f'spyx_mexc_{gran}'] = []
-
-        # Iran Strike Probability (Polymarket)
-        if 'iran' in assets:
-            print(f'  Fetching Iran strike prob from Polymarket...')
+        # Hormuz Strait Closure Probability (Polymarket)
+        if 'hormuz' in assets:
+            print(f'  Fetching Hormuz prob from Polymarket...')
             try:
                 data = polymarket.fetch(start_ts, end_ts, gran,
+                                        market_key='hormuz',
                                         verbose=args.verbose)
-                all_data[f'iran_polymarket_{gran}'] = data
+                all_data[f'hormuz_polymarket_{gran}'] = data
                 total_candles += len(data)
             except Exception as e:
-                print(f'  [ERROR] Polymarket Iran fetch failed: {e}')
-                all_data[f'iran_polymarket_{gran}'] = []
+                print(f'  [ERROR] Polymarket Hormuz fetch failed: {e}')
+                all_data[f'hormuz_polymarket_{gran}'] = []
+
+        # US x Iran Ceasefire Probability (Polymarket)
+        if 'ceasefire' in assets:
+            print(f'  Fetching Ceasefire prob from Polymarket...')
+            try:
+                data = polymarket.fetch(start_ts, end_ts, gran,
+                                        market_key='ceasefire',
+                                        verbose=args.verbose)
+                all_data[f'ceasefire_polymarket_{gran}'] = data
+                total_candles += len(data)
+            except Exception as e:
+                print(f'  [ERROR] Polymarket Ceasefire fetch failed: {e}')
+                all_data[f'ceasefire_polymarket_{gran}'] = []
+
+        # Iranian Regime Fall Probability (Polymarket)
+        if 'regime' in assets:
+            print(f'  Fetching Regime prob from Polymarket...')
+            try:
+                data = polymarket.fetch(start_ts, end_ts, gran,
+                                        market_key='regime',
+                                        verbose=args.verbose)
+                all_data[f'regime_polymarket_{gran}'] = data
+                total_candles += len(data)
+            except Exception as e:
+                print(f'  [ERROR] Polymarket Regime fetch failed: {e}')
+                all_data[f'regime_polymarket_{gran}'] = []
 
     print(f'\n=== Total: {total_candles} candles across {len(all_data)} series ===')
 

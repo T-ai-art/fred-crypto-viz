@@ -2,12 +2,21 @@
 HTML Builder v2 — Live-refresh FRED-like interactive data visualization.
 
 Changes from v1:
-- Default: 1H granularity, 1-week period, Bitfinex only, BTC right axis
+- Default: 1min granularity, 1-week period, Bitfinex only, BTC right axis
 - Auto-refresh every 1 hour + manual refresh button
 - Browser-side API fetching for live data updates
 - Download fetches all granularities including 1m with latest data
 - Updated colors: Linen (Bitfinex), Violet (BTC), Neutral Alt (OKX)
 - Gray/inactive CSV/Excel buttons
+
+v2.1 changes:
+- Removed SPYx (low liquidity) — no more MEXC fetcher
+- Replaced single Iran Strike % with 3 Polymarket markets:
+  1. Hormuz Closure % (red #ef4444)
+  2. Ceasefire % (blue #3b82f6)
+  3. Regime Fall % (amber #f59e0b)
+- All 3 markets are ACTIVE → live-refresh enabled
+- Removed 'None' right-axis option
 """
 
 import json
@@ -60,7 +69,7 @@ _CSS = """
   --bg: #0d1117; --surface: #161b22; --border: #30363d;
   --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
   --gold-bfx: #CCB58A; --gold-okx: #DB7600;
-  --btc: #834C82; --spyx: #a855f7; --iran: #ef4444;
+  --btc: #834C82; --hormuz: #ef4444; --ceasefire: #3b82f6; --regime: #f59e0b;
   --green: #3fb950; --red: #f85149;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -129,9 +138,9 @@ _HTML_BODY = """
     <div class="ctrl-group">
       <label>Right Axis:</label>
       <input type="radio" name="right-axis" id="rb-btc" value="btc" checked onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-btc').click()"> BTC</span>
-      <input type="radio" name="right-axis" id="rb-spyx" value="spyx" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-spyx').click()"> SPYx</span>
-      <input type="radio" name="right-axis" id="rb-iran" value="iran" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-iran').click()"> Iran %</span>
-      <input type="radio" name="right-axis" id="rb-none" value="none" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-none').click()"> None</span>
+      <input type="radio" name="right-axis" id="rb-hormuz" value="hormuz" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-hormuz').click()"> Hormuz %</span>
+      <input type="radio" name="right-axis" id="rb-ceasefire" value="ceasefire" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-ceasefire').click()"> Ceasefire %</span>
+      <input type="radio" name="right-axis" id="rb-regime" value="regime" onchange="render()"><span class="cb-label" onclick="document.getElementById('rb-regime').click()"> Regime %</span>
     </div>
     <div class="sep"></div>
     <div class="ctrl-group">
@@ -180,7 +189,7 @@ _HTML_BODY = """
   </div>
 
   <footer>
-    <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a> | <a href="https://www.mexc.com" target="_blank">MEXC</a> | <a href="https://polymarket.com/event/us-strikes-iran-by" target="_blank">Polymarket</a></div>
+    <div>Sources: <a href="https://www.okx.com" target="_blank">OKX</a> | <a href="https://www.bitfinex.com" target="_blank">Bitfinex</a> | <a href="https://www.binance.com" target="_blank">Binance</a> | <a href="https://polymarket.com" target="_blank">Polymarket</a></div>
     <div>Auto-refresh: 1h</div>
   </footer>
 
@@ -226,30 +235,35 @@ var _refreshing = false;
 var _autoRefreshInterval = null;
 
 var COLORS = {
-  xaut_okx:       {line:'#DB7600',fill:'rgba(219,118,0,0.10)',label:'XAUt (OKX)'},
-  xaut_bitfinex:  {line:'#CCB58A',fill:'rgba(204,181,138,0.15)',label:'XAUt (Bitfinex)'},
-  btc_binance:    {line:'#834C82',fill:'rgba(131,76,130,0.12)',label:'BTC (Binance)'},
-  spyx_mexc:      {line:'#a855f7',fill:'rgba(168,85,247,0.08)',label:'SPYx (MEXC)'},
-  iran_polymarket:{line:'#ef4444',fill:'rgba(239,68,68,0.12)',label:'Iran Strike % (Polymarket)'}
+  xaut_okx:             {line:'#DB7600',fill:'rgba(219,118,0,0.10)',label:'XAUt (OKX)'},
+  xaut_bitfinex:        {line:'#CCB58A',fill:'rgba(204,181,138,0.15)',label:'XAUt (Bitfinex)'},
+  btc_binance:          {line:'#834C82',fill:'rgba(131,76,130,0.12)',label:'BTC (Binance)'},
+  hormuz_polymarket:    {line:'#ef4444',fill:'rgba(239,68,68,0.12)',label:'Hormuz Closure % (Polymarket)'},
+  ceasefire_polymarket: {line:'#3b82f6',fill:'rgba(59,130,246,0.12)',label:'Ceasefire % (Polymarket)'},
+  regime_polymarket:    {line:'#f59e0b',fill:'rgba(245,158,11,0.12)',label:'Regime Fall % (Polymarket)'}
 };
 
 var RIGHT_AXIS_LABELS = {
   btc: 'BTC (USD)',
-  spyx: 'SPYx (USD)',
-  iran: 'Strike Probability (%)'
+  hormuz: 'Hormuz Closure Probability (%)',
+  ceasefire: 'Ceasefire Probability (%)',
+  regime: 'Regime Fall Probability (%)'
 };
-var PERCENT_ASSETS = ['iran'];
+var PERCENT_ASSETS = ['hormuz','ceasefire','regime'];
 
 // Timeframe mappings per exchange
 var TF = {
   bitfinex:  {'1m':'1m','5m':'5m','15m':'15m','1H':'1h','4H':'4h','1D':'1D'},
   binance:   {'1m':'1m','5m':'5m','15m':'15m','1H':'1h','4H':'4h','1D':'1d'},
-  mexc:      {'1m':'1m','5m':'5m','15m':'15m','1H':'1h','4H':'4h','1D':'1d'},
   polymarket:{'1m':1,'5m':5,'15m':15,'1H':60,'4H':240,'1D':1440},
   okx:       {'1m':'1m','5m':'5m','15m':'15m','1H':'1H','4H':'4Hutc','1D':'1Dutc'}
 };
 
-var POLY_TOKEN = '110790003121442365126855864076707686014650523258783405996925622264696084778807';
+var POLY_TOKENS = {
+  hormuz:    '11259214629259962188961658360673801608680858594287954976598964541495296876564',
+  ceasefire: '5708561660601459805512817131601230493971589760294984590237789749933853841330',
+  regime:    '38397507750621893057346880033441136112987238933685677349709401910643842844855'
+};
 
 // ========== UTILITY ==========
 function sleep(ms) { return new Promise(function(r){setTimeout(r,ms);}); }
@@ -315,30 +329,6 @@ async function apiFetchBinance(startSec, endSec, gran) {
   return Object.values(results).sort(function(a,b){return a[0]-b[0];});
 }
 
-async function apiFetchMEXC(startSec, endSec, gran) {
-  var interval = TF.mexc[gran] || '1h';
-  var results = {};
-  var cursor = startSec * 1000;
-  var endMs = endSec * 1000;
-  for (var page = 0; page < 200; page++) {
-    if (cursor >= endMs) break;
-    try {
-      var url = 'https://api.mexc.com/api/v3/klines?symbol=SPYXUSDT&interval='+interval+'&startTime='+cursor+'&endTime='+endMs+'&limit=1000';
-      var resp = await fetch(url);
-      var rows = await resp.json();
-      if (!Array.isArray(rows) || rows.length === 0) break;
-      rows.forEach(function(r) {
-        var ts = Math.floor(r[0] / 1000);
-        if (ts >= startSec && ts <= endSec) results[ts] = [ts, +r[1], +r[2], +r[3], +r[4], +r[5]||0];
-      });
-      if (rows.length < 500) break;
-      cursor = rows[rows.length-1][0] + 1;
-      await sleep(150);
-    } catch(e) { console.warn('MEXC fetch error:', e); break; }
-  }
-  return Object.values(results).sort(function(a,b){return a[0]-b[0];});
-}
-
 async function apiFetchOKX(startSec, endSec, gran) {
   var bar = TF.okx[gran] || '1H';
   var results = {};
@@ -366,7 +356,7 @@ async function apiFetchOKX(startSec, endSec, gran) {
   return Object.values(results).sort(function(a,b){return a[0]-b[0];});
 }
 
-async function apiFetchPolymarket(startSec, endSec, gran) {
+async function apiFetchPolymarket(startSec, endSec, gran, tokenId) {
   var fidelity = TF.polymarket[gran] || 60;
   var results = {};
   var chunkSize = 86400 * 7;
@@ -374,7 +364,7 @@ async function apiFetchPolymarket(startSec, endSec, gran) {
   while (cursor < endSec) {
     var chunkEnd = Math.min(cursor + chunkSize, endSec);
     try {
-      var url = 'https://clob.polymarket.com/prices-history?market='+POLY_TOKEN+'&startTs='+cursor+'&endTs='+chunkEnd+'&fidelity='+fidelity;
+      var url = 'https://clob.polymarket.com/prices-history?market='+tokenId+'&startTs='+cursor+'&endTs='+chunkEnd+'&fidelity='+fidelity;
       var resp = await fetch(url);
       var data = await resp.json();
       var history = data.history || [];
@@ -424,11 +414,19 @@ async function refreshData() {
     promises.push(apiFetchBinance(startSec, now, gran));
     keys.push('btc_binance_'+gran);
 
-    if (rightAsset === 'spyx') {
-      promises.push(apiFetchMEXC(startSec, now, gran));
-      keys.push('spyx_mexc_'+gran);
+    // Polymarket: active markets — live fetch for selected right axis
+    if (rightAsset === 'hormuz' && POLY_TOKENS.hormuz && POLY_TOKENS.hormuz.indexOf('PLACEHOLDER') < 0) {
+      promises.push(apiFetchPolymarket(startSec, now, gran, POLY_TOKENS.hormuz));
+      keys.push('hormuz_polymarket_'+gran);
     }
-    // Iran/Polymarket: resolved contract — skip live fetch
+    if (rightAsset === 'ceasefire' && POLY_TOKENS.ceasefire && POLY_TOKENS.ceasefire.indexOf('PLACEHOLDER') < 0) {
+      promises.push(apiFetchPolymarket(startSec, now, gran, POLY_TOKENS.ceasefire));
+      keys.push('ceasefire_polymarket_'+gran);
+    }
+    if (rightAsset === 'regime' && POLY_TOKENS.regime && POLY_TOKENS.regime.indexOf('PLACEHOLDER') < 0) {
+      promises.push(apiFetchPolymarket(startSec, now, gran, POLY_TOKENS.regime));
+      keys.push('regime_polymarket_'+gran);
+    }
 
     var results = await Promise.allSettled(promises);
     results.forEach(function(r, i) {
@@ -487,17 +485,18 @@ async function fetchAllForExport() {
     promises.push(apiFetchBinance(startSec, endSec, gran).catch(function(){return [];}));
     pKeys.push('btc_binance_'+gran);
 
-    // MEXC (if SPYx data exists)
-    var hasSpyx = false;
-    for (var k in DATA) { if (k.indexOf('spyx_') === 0 && DATA[k] && DATA[k].length > 0) { hasSpyx = true; break; } }
-    if (hasSpyx) {
-      promises.push(apiFetchMEXC(startSec, endSec, gran).catch(function(){return [];}));
-      pKeys.push('spyx_mexc_'+gran);
-    }
-
-    // Polymarket (use embedded — resolved contract)
-    var iranKey = 'iran_polymarket_'+gran;
-    if (DATA[iranKey] && DATA[iranKey].length > 0) dlData[iranKey] = DATA[iranKey];
+    // Polymarket: active markets — live fetch for export
+    var polyMarkets = ['hormuz','ceasefire','regime'];
+    polyMarkets.forEach(function(mk) {
+      if (POLY_TOKENS[mk] && POLY_TOKENS[mk].indexOf('PLACEHOLDER') < 0) {
+        promises.push(apiFetchPolymarket(startSec, endSec, gran, POLY_TOKENS[mk]).catch(function(){return [];}));
+        pKeys.push(mk+'_polymarket_'+gran);
+      } else {
+        // fallback to embedded data
+        var embKey = mk+'_polymarket_'+gran;
+        if (DATA[embKey] && DATA[embKey].length > 0) dlData[embKey] = DATA[embKey];
+      }
+    });
 
     var results = await Promise.all(promises);
     results.forEach(function(data, i) {
@@ -536,19 +535,17 @@ function initApp() {
     if (!hasData) { selGran.options[i].disabled = true; selGran.options[i].text += ' (no data)'; }
   }
 
-  // Disable radio buttons for missing assets
-  var hasSpyx = false;
-  for (var k in DATA) { if (k.indexOf('spyx_') === 0 && DATA[k] && DATA[k].length > 0) { hasSpyx = true; break; } }
-  if (!hasSpyx) {
-    document.getElementById('rb-spyx').disabled = true;
-    document.getElementById('rb-spyx').nextElementSibling.className = 'cb-label disabled';
-  }
-  var hasIran = false;
-  for (var k in DATA) { if (k.indexOf('iran_') === 0 && DATA[k] && DATA[k].length > 0) { hasIran = true; break; } }
-  if (!hasIran) {
-    document.getElementById('rb-iran').disabled = true;
-    document.getElementById('rb-iran').nextElementSibling.className = 'cb-label disabled';
-  }
+  // Disable radio buttons for missing Polymarket assets
+  ['hormuz','ceasefire','regime'].forEach(function(mk) {
+    var hasData = false;
+    for (var k in DATA) { if (k.indexOf(mk+'_') === 0 && DATA[k] && DATA[k].length > 0) { hasData = true; break; } }
+    // Also enable if token is available for live fetch
+    if (!hasData && POLY_TOKENS[mk] && POLY_TOKENS[mk].indexOf('PLACEHOLDER') < 0) hasData = true;
+    if (!hasData) {
+      var rb = document.getElementById('rb-'+mk);
+      if (rb) { rb.disabled = true; rb.nextElementSibling.className = 'cb-label disabled'; }
+    }
+  });
 
   render();
 
@@ -610,18 +607,12 @@ function render() {
       datasets.push(makeDataset('btc_binance', d, axisId, false));
       if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
     }
-  } else if (rightAsset === 'spyx') {
-    var d = getFiltered('spyx_mexc_' + gran, startTs, endTs);
+  } else if (rightAsset === 'hormuz' || rightAsset === 'ceasefire' || rightAsset === 'regime') {
+    var polyKey = rightAsset + '_polymarket_' + gran;
+    var d = getFiltered(polyKey, startTs, endTs);
     if (d.length > 0) {
       var axisId = hasLeftAxis ? 'y1' : 'y';
-      datasets.push(makeDataset('spyx_mexc', d, axisId, false));
-      if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
-    }
-  } else if (rightAsset === 'iran') {
-    var d = getFiltered('iran_polymarket_' + gran, startTs, endTs);
-    if (d.length > 0) {
-      var axisId = hasLeftAxis ? 'y1' : 'y';
-      datasets.push(makeDataset('iran_polymarket', d, axisId, false));
+      datasets.push(makeDataset(rightAsset+'_polymarket', d, axisId, false));
       if (axisId === 'y1') hasRightAxis = true; else hasLeftAxis = true;
     }
   }
@@ -673,8 +664,9 @@ function render() {
   var parts = [];
   if (showXaut) parts.push('XAUt');
   if (rightAsset === 'btc') parts.push('BTC');
-  else if (rightAsset === 'spyx') parts.push('SPYx');
-  else if (rightAsset === 'iran') parts.push('Iran Strike %');
+  else if (rightAsset === 'hormuz') parts.push('Hormuz Closure %');
+  else if (rightAsset === 'ceasefire') parts.push('Ceasefire %');
+  else if (rightAsset === 'regime') parts.push('Regime Fall %');
   document.getElementById('chart-title').textContent = parts.join(' & ') + ' \u2014 ' + gran + ' Chart';
 }
 
@@ -690,8 +682,9 @@ function updateStats(gran, startTs, endTs, showXaut, showOkx, showBfx, rightAsse
   if (showXaut && showOkx) cards.push({key:'xaut_okx_'+gran,name:'XAUt (OKX)',color:'var(--gold-okx)'});
   if (showXaut && showBfx) cards.push({key:'xaut_bitfinex_'+gran,name:'XAUt (Bitfinex)',color:'var(--gold-bfx)'});
   if (rightAsset === 'btc') cards.push({key:'btc_binance_'+gran,name:'BTC (Binance)',color:'var(--btc)'});
-  if (rightAsset === 'spyx') cards.push({key:'spyx_mexc_'+gran,name:'SPYx (MEXC)',color:'var(--spyx)'});
-  if (rightAsset === 'iran') cards.push({key:'iran_polymarket_'+gran,name:'Iran Strike % (Polymarket)',color:'var(--iran)',isPercent:true});
+  if (rightAsset === 'hormuz') cards.push({key:'hormuz_polymarket_'+gran,name:'Hormuz Closure % (Polymarket)',color:'var(--hormuz)',isPercent:true});
+  if (rightAsset === 'ceasefire') cards.push({key:'ceasefire_polymarket_'+gran,name:'Ceasefire % (Polymarket)',color:'var(--ceasefire)',isPercent:true});
+  if (rightAsset === 'regime') cards.push({key:'regime_polymarket_'+gran,name:'Regime Fall % (Polymarket)',color:'var(--regime)',isPercent:true});
 
   cards.forEach(function(c) {
     var d = getFiltered(c.key, startTs, endTs);
@@ -746,7 +739,7 @@ function exportCSV(dlData) {
 
   grans.forEach(function(gran) {
     var series = [];
-    var allKeys = ['xaut_okx_'+gran,'xaut_bitfinex_'+gran,'btc_binance_'+gran,'spyx_mexc_'+gran,'iran_polymarket_'+gran];
+    var allKeys = ['xaut_okx_'+gran,'xaut_bitfinex_'+gran,'btc_binance_'+gran,'hormuz_polymarket_'+gran,'ceasefire_polymarket_'+gran,'regime_polymarket_'+gran];
     allKeys.forEach(function(key){ if(dlData[key] && dlData[key].length > 0) series.push(key); });
     if (series.length === 0) return;
 
@@ -780,8 +773,9 @@ function exportXLSX(dlData) {
     if(dlData['xaut_okx_'+gran] && dlData['xaut_okx_'+gran].length>0) sheetConfigs.push({key:'xaut_okx_'+gran,name:'XAUt_OKX_'+gran});
     if(dlData['xaut_bitfinex_'+gran] && dlData['xaut_bitfinex_'+gran].length>0) sheetConfigs.push({key:'xaut_bitfinex_'+gran,name:'XAUt_BFX_'+gran});
     if(dlData['btc_binance_'+gran] && dlData['btc_binance_'+gran].length>0) sheetConfigs.push({key:'btc_binance_'+gran,name:'BTC_'+gran});
-    if(dlData['spyx_mexc_'+gran] && dlData['spyx_mexc_'+gran].length>0) sheetConfigs.push({key:'spyx_mexc_'+gran,name:'SPYx_'+gran});
-    if(dlData['iran_polymarket_'+gran] && dlData['iran_polymarket_'+gran].length>0) sheetConfigs.push({key:'iran_polymarket_'+gran,name:'Iran_'+gran});
+    if(dlData['hormuz_polymarket_'+gran] && dlData['hormuz_polymarket_'+gran].length>0) sheetConfigs.push({key:'hormuz_polymarket_'+gran,name:'Hormuz_'+gran});
+    if(dlData['ceasefire_polymarket_'+gran] && dlData['ceasefire_polymarket_'+gran].length>0) sheetConfigs.push({key:'ceasefire_polymarket_'+gran,name:'Ceasefire_'+gran});
+    if(dlData['regime_polymarket_'+gran] && dlData['regime_polymarket_'+gran].length>0) sheetConfigs.push({key:'regime_polymarket_'+gran,name:'Regime_'+gran});
 
     sheetConfigs.forEach(function(cfg) {
       var d = dlData[cfg.key];
